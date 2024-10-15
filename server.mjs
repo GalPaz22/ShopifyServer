@@ -278,7 +278,7 @@ async function reorderResultsWithGPT(combinedResults, query) {
 
     // Send the request to GPT-4
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // Use GPT-4, or "gpt-3.5-turbo" for faster response
+      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
       messages: messages,
       temperature: 0.7,
     });
@@ -463,7 +463,7 @@ app.post("/search", async (req, res) => {
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 15); // Get the top 12 results
+      .slice(0, 12); // Get the top 12 results
 
     // Reorder the results with GPT-4 based on description relevance to the query
     const reorderedIds = await reorderResultsWithGPT(combinedResults, query);
