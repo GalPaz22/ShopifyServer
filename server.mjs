@@ -463,7 +463,7 @@ app.post("/search", async (req, res) => {
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 15); // Get the top 12 results
+      .slice(0, 12); // Get the top 12 results
 
     // Reorder the results with GPT-4 based on description relevance to the query
     const reorderedIds = await reorderResultsWithGPT(combinedResults, query);
