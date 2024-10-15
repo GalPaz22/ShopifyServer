@@ -1,6 +1,6 @@
 import express from "express";
 import bodyParser from "body-parser";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import { OpenAI } from "openai";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -16,8 +16,8 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const mongodbUri = process.env.MONGODB_URI;
 let client;
 
-async function connectToMongoDB() {
-  if (!client) {
+async function connectToMongoDB(mongodbUri) {
+  if (!client || !client.topology || !client.topology.isConnected()) { 
     client = new MongoClient(mongodbUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
@@ -256,9 +256,99 @@ async function logQuery(queryCollection, query, filters) {
 }
 
 // Route to handle the search endpoint
+async function reorderResultsWithGPT(combinedResults, query) {
+  try {
+    // Prepare an array of objects containing only product IDs and descriptions
+    const productData = combinedResults.map((product) => ({
+      id: product._id.toString(),
+      description: product.description || "No description",
+    }));
+
+    const messages = [
+      {
+        role: "user",
+        content: `Here is a search query: "${query}". Please reorder the following products based on their descriptions' and names relevance to the query. Return the reordered list as an array of product IDs in the order they should appear. answer only with the array of product IDs (no 'json' at the beginning or something, just plain array- always!) in the right order, nothing else`,
+      },
+      {
+        role: "user",
+        content: JSON.stringify(productData, null, 2), // Send only ID and description
+      },
+    ];
+
+    // Send the request to GPT-4
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
+      messages: messages,
+      temperature: 0.7,
+    });
+
+    // Extract and parse the reordered product IDs
+    const reorderedText = response.choices[0]?.message?.content;
+    console.log("Reordered IDs text:", reorderedText);
+    
+    if (!reorderedText) {
+      throw new Error("No content returned from GPT-4");
+    }
+
+    // Parse the response which should be an array of product IDs
+    const reorderedIds = JSON.parse(reorderedText);
+    
+    if (!Array.isArray(reorderedIds)) {
+      throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
+    }
+
+    return reorderedIds;
+  } catch (error) {
+    console.error("Error reordering results with GPT:", error);
+    throw error;
+  }
+}
+
+
+
+async function getProductsByIds(ids, dbName, collectionName) {
+  try {
+    // Ensure the MongoDB client is connected
+    const client = await connectToMongoDB(mongodbUri);
+    const db = client.db(dbName);
+    const collection = db.collection(collectionName);
+
+    // Convert the ids to ObjectId and filter out invalid ones
+    const objectIdArray = ids.map(id => {
+      try {
+        return new ObjectId(id); // Convert to ObjectId
+      } catch (error) {
+        console.error(`Invalid ObjectId format: ${id}`);
+        return null; // If not valid, return null
+      }
+    }).filter(id => id !== null); // Filter out invalid ObjectIds
+
+    // Fetch products from MongoDB
+    const products = await collection.find({ _id: { $in: objectIdArray } }).toArray();
+
+    // Log fetched products for debugging
+    console.log("Fetched products from MongoDB:", products);
+
+    // Map the products back to the original IDs order, skipping undefined products
+    const orderedProducts = ids.map(id => products.find(product => product && product._id.toString() === id))
+                               .filter(product => product !== undefined); // Skip missing products
+
+    // Log if any products were skipped
+    console.log(`Number of products returned: ${orderedProducts.length}/${ids.length}`);
+
+    return orderedProducts;
+  } catch (error) {
+    console.error("Error fetching products by IDs:", error);
+    throw error;
+  }
+}
+
+
+
+
+// Route to handle the search endpoint
 app.post("/search", async (req, res) => {
   const {
-    mongodbUri,
     dbName,
     collectionName,
     query,
@@ -278,7 +368,7 @@ app.post("/search", async (req, res) => {
   let client;
 
   try {
-    const client = await connectToMongoDB(mongodbUri);
+    client = await connectToMongoDB(mongodbUri);
     const db = client.db(dbName);
     const collection = db.collection(collectionName);
     const querycollection = db.collection("queries");
@@ -373,26 +463,31 @@ app.post("/search", async (req, res) => {
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 12);
+      .slice(0, 15); // Get the top 12 results
+
+    // Reorder the results with GPT-4 based on description relevance to the query
+    const reorderedIds = await reorderResultsWithGPT(combinedResults, query);
+    const orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
 
     // Format results
-    const formattedResults = combinedResults.map((product) => ({
-      id: product._id,
+  
+
+    const formattedResults = orderedProducts.map((product) => ({
+      id: product._id.toString(),
       name: product.name,
       description: product.description,
       price: product.price,
       image: product.image,
       url: product.url,
-      rrf_score: product.rrf_score,
     }));
 
+    // Ensure that the response is sent only once
     res.json(formattedResults);
   } catch (error) {
     console.error("Error handling search request:", error);
-    res.status(500).json({ error: "Server error" });
-  } finally {
-    if (client) {
-      await client.close();
+    // If an error occurs, send the response here and ensure you don't send it again later
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Server error." });
     }
   }
 });
