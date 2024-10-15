@@ -285,7 +285,7 @@ async function reorderResultsWithGPT(combinedResults, query) {
 
     // Extract and parse the reordered product IDs
     const reorderedText = response.choices[0]?.message?.content;
-    console.log("Reordered IDs text:", reorderedText);
+   
     
     if (!reorderedText) {
       throw new Error("No content returned from GPT-4");
@@ -328,8 +328,7 @@ async function getProductsByIds(ids, dbName, collectionName) {
     const products = await collection.find({ _id: { $in: objectIdArray } }).toArray();
 
     // Log fetched products for debugging
-    console.log("Fetched products from MongoDB:", products);
-
+   
     // Map the products back to the original IDs order, skipping undefined products
     const orderedProducts = ids.map(id => products.find(product => product && product._id.toString() === id))
                                .filter(product => product !== undefined); // Skip missing products
