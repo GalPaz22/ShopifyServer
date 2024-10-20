@@ -278,7 +278,7 @@ async function reorderResultsWithGPT(combinedResults, query) {
 
     // Send the request to GPT-4
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // Use GPT-4, or "gpt-3.5-turbo" for faster response
+      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
       messages: messages,
       temperature: 0.7,
     });
