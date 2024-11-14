@@ -15,7 +15,90 @@ app.use(cors({ origin: "*" }));
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const mongodbUri = process.env.MONGODB_URI;
 let client;
+const buildAutocompletePipeline = (query, indexName, path) => {
+  return [
+    {
+      $search: {
+        index: indexName, // Specific autocomplete index
+        autocomplete: {
+          query: query,
+          path: path, // Field to search (e.g., "name" or "description")
+          fuzzy: { maxEdits: 1 },
+        },
+      },
+    },
+    { $limit: 10 },
+    {
+      $project: {
+        _id: 0,
+        suggestion: `$${path}`, 
+        score: { $meta: "searchScore" },
+        url: 1,
+        image: 1,
+        price: 1 // Project only the suggestion field
+      },
+    },
+  ];
+};
 
+// Autocomplete endpoint to fetch suggestions from two different collections
+app.get("/autocomplete", async (req, res) => {
+  const { dbName, collectionName1, collectionName2, query } = req.query;
+
+  if (!dbName || !collectionName1 || !collectionName2 || !query) {
+    return res.status(400).json({ error: "Database name, both collection names, and query are required." });
+  }
+
+  try {
+    const client = await connectToMongoDB(mongodbUri);
+    const db = client.db(dbName);
+
+    // Collections to fetch from
+    const collection1 = db.collection(collectionName1);
+    const collection2 = db.collection(collectionName2);
+
+    // Build pipelines for each collection
+    const pipeline1 = buildAutocompletePipeline(query, "default", "name");
+    const pipeline2 = buildAutocompletePipeline(query, "default2", "query");
+
+    // Fetch suggestions from both collections in parallel
+    const [suggestions1, suggestions2] = await Promise.all([
+      collection1.aggregate(pipeline1).toArray(),
+      collection2.aggregate(pipeline2).toArray(),
+    ]);
+
+    // Add source field to differentiate the collections
+    const labeledSuggestions1 = suggestions1.map(item => ({ 
+      suggestion: item.suggestion, 
+      score: item.score, 
+      source: collectionName1 ,
+      url: item.url,
+      price: item.price,
+      image: item.image
+     
+    }));
+    const labeledSuggestions2 = suggestions2.map(item => ({ 
+      suggestion: item.suggestion, 
+      score: item.score, 
+      source: collectionName2 ,
+      url: item.url
+    }));
+
+    // Combine and deduplicate suggestions
+     const combinedSuggestions = [...labeledSuggestions1, ...labeledSuggestions2]
+    .sort((a, b) => b.score - a.score)
+    .filter((item, index, self) =>
+      index === self.findIndex((t) => t.suggestion === item.suggestion)
+    );
+
+
+
+    res.json(combinedSuggestions);
+  } catch (error) {
+    console.error("Error fetching autocomplete suggestions:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
 async function connectToMongoDB(mongodbUri) {
   if (!client || !client.topology || !client.topology.isConnected()) { 
