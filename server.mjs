@@ -351,7 +351,7 @@ async function reorderResultsWithGPT(combinedResults, query) {
     const messages = [
       {
         role: "user",
-        content: `Here is a search query: "${query}". Please reorder the following products based on their descriptions' and names relevance to the query. Return the reordered list as an array of product IDs in the order they should appear. answer only with the array of product IDs (no 'json' at the beginning or something, just plain array- always!) in the right order, nothing else.`,
+        content: `Here is a search query: "${query}". Please reorder the following products based on their descriptions' and names relevance to the query. Return the reordered list as an array of the 10 most relevant products by their product IDs in the order they should appear. answer only with the array of product IDs (no 'json' at the beginning or something, just plain array- always!) in the right order, nothing else.`,
       },
       {
         role: "user",
@@ -546,7 +546,7 @@ app.post("/search", async (req, res) => {
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 12); // Get the top 12 results
+      .slice(0, 20); // Get the top 12 results
 
     // Reorder the results with GPT-4 based on description relevance to the query
     const reorderedIds = await reorderResultsWithGPT(combinedResults, query);
