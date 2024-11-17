@@ -450,7 +450,7 @@ app.post("/search", async (req, res) => {
     context
   } = req.body;
 
-  if (!query || !mongodbUri || !dbName || !collectionName || !systemPrompt) {
+  if (!query || !mongodbUri || !dbName || !collectionName ) {
     return res.status(400).json({
       error:
         "Query, MongoDB URI, database name, collection name, and system prompt are required",
