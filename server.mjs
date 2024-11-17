@@ -275,13 +275,20 @@ function removeWordsFromQuery(query, noHebrewWord) {
 }
 
 // Utility function to extract filters from query using LLM
-async function extractFiltersFromQuery(query, systemPrompt) {
+async function extractFiltersFromQuery(query, categories, types, example) {
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: `Extract the following filters from the query if they exist:
+                  1. price (exact price, indicated by the words 'ב' or 'באיזור ה-').
+                  2. minPrice (minimum price, indicated by 'החל מ' or 'מ').
+                  3. maxPrice (maximum price, indicated by the word 'עד').
+                  4. category- one of the following Hebrew words: ${categories}. pay close attention to find these category in the query, and look if the use mentions a short of the category (e.g- 'רוזה' instead of 'יין רוזה)
+                  5. type- one or both of the following Hebrew words: ${types}. pay close attention to find these type in the query
+                Return the extracted filters in JSON format. If a filter is not present in the query, omit it from the JSON response. For example:
+               ${example}.` },
         { role: "user", content: query },
       ],
       temperature: 0.5,
@@ -435,7 +442,9 @@ app.post("/search", async (req, res) => {
     dbName,
     collectionName,
     query,
-    systemPrompt,
+    categories,
+    types,
+    example,
     noWord,
     noHebrewWord,
     context
