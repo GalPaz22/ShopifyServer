@@ -15,16 +15,27 @@ app.use(cors({ origin: "*" }));
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const mongodbUri = process.env.MONGODB_URI;
 let client;
+
 const buildAutocompletePipeline = (query, indexName, path) => {
+  // Regular expression to check if the query contains any digits
+  const hasNumbers = /\d/.test(query);
+
+  // Construct the autocomplete options based on the presence of numbers
+  const autocompleteOptions = {
+    query: query, // The input query string
+    path: path,   // Field to search (e.g., "name" or "description")
+  };
+
+  // If the query does not contain numbers, enable fuzzy matching
+  if (!hasNumbers) {
+    autocompleteOptions.fuzzy = { maxEdits: 2 };
+  }
+
   return [
     {
       $search: {
         index: indexName, // Specific autocomplete index
-        autocomplete: {
-          query: query,
-          path: path, // Field to search (e.g., "name" or "description")
-          fuzzy: { maxEdits: 1 },
-        },
+        autocomplete: autocompleteOptions,
       },
     },
     { $limit: 10 },
@@ -35,7 +46,7 @@ const buildAutocompletePipeline = (query, indexName, path) => {
         score: { $meta: "searchScore" },
         url: 1,
         image: 1,
-        price: 1 // Project only the suggestion field
+        price: 1, // Project only the necessary fields
       },
     },
   ];
@@ -54,8 +65,8 @@ app.get("/autocomplete", async (req, res) => {
     const db = client.db(dbName);
 
     // Collections to fetch from
-    const collection1 = db.collection(collectionName1);
-    const collection2 = db.collection(collectionName2);
+    const collection1 = db.collection(collectionName1); // Assume this is "products"
+    const collection2 = db.collection(collectionName2); // Other collection
 
     // Build pipelines for each collection
     const pipeline1 = buildAutocompletePipeline(query, "default", "name");
@@ -67,31 +78,31 @@ app.get("/autocomplete", async (req, res) => {
       collection2.aggregate(pipeline2).toArray(),
     ]);
 
-    // Add source field to differentiate the collections
+    // Adjust scores for product suggestions to prioritize them
+    const scoreMultiplier = 2; // Adjust this multiplier as needed
+
     const labeledSuggestions1 = suggestions1.map(item => ({ 
       suggestion: item.suggestion, 
-      score: item.score, 
-      source: collectionName1 ,
+      score: item.score * scoreMultiplier, // Boost the score
+      source: collectionName1,
       url: item.url,
       price: item.price,
       image: item.image
-     
     }));
+
     const labeledSuggestions2 = suggestions2.map(item => ({ 
       suggestion: item.suggestion, 
-      score: item.score, 
-      source: collectionName2 ,
+      score: item.score, // Original score
+      source: collectionName2,
       url: item.url
     }));
 
     // Combine and deduplicate suggestions
-     const combinedSuggestions = [...labeledSuggestions1, ...labeledSuggestions2]
-    .sort((a, b) => b.score - a.score)
-    .filter((item, index, self) =>
-      index === self.findIndex((t) => t.suggestion === item.suggestion)
-    );
-
-
+    const combinedSuggestions = [...labeledSuggestions1, ...labeledSuggestions2]
+      .sort((a, b) => b.score - a.score)
+      .filter((item, index, self) =>
+        index === self.findIndex((t) => t.suggestion === item.suggestion)
+      );
 
     res.json(combinedSuggestions);
   } catch (error) {
