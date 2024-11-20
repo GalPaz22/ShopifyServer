@@ -256,7 +256,7 @@ function removeWineFromQuery(translatedQuery, noWord) {
   const queryWords = translatedQuery.split(" ");
   const filteredWords = queryWords.filter((word) => {
     // Remove the word if it's in the noWord list or if it's a number
-    return !noWord.includes(word.toLowerCase()) && isNaN(Number(word));
+    return !noWord.includes(word.toLowerCase()) ;
   });
 
   return filteredWords.join(" ");
@@ -268,7 +268,7 @@ function removeWordsFromQuery(query, noHebrewWord) {
   const queryWords = query.split(" ");
   const filteredWords = queryWords.filter((word) => {
     // Remove the word if it's in the noWords list or if it's a number
-    return !noHebrewWord.includes(word.toLowerCase()) && isNaN(Number(word));
+    return !noHebrewWord.includes(word.toLowerCase());
   });
 
   return filteredWords.join(" ");
@@ -555,7 +555,7 @@ app.post("/search", async (req, res) => {
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 20); // Get the top 12 results
+      .slice(0, 35); // Get the top 12 results
 
     // Reorder the results with GPT-4 based on description relevance to the query
     const reorderedIds = await reorderResultsWithGPT(combinedResults, query);
