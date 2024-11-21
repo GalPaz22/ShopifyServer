@@ -370,7 +370,7 @@ async function reorderResultsWithGPT(combinedResults, query) {
     const messages = [
       {
         role: "user",
-        content: `Here is a search query: "${query}". this is a query out of e-commerce site, so your role is to find the best match out of the product you will get to this query. sometimes you will get the prices as well (e.g- 'אייפון מהדגם הכי חדש שיש בחנות 2000 ש''ח'), dont let it affect your answer. Please reorder the following products based on their descriptions' and names relevance to the query. Return the reordered list as an array of the 20 most relevant products by their product IDs in the order they should appear. answer only with the array of product IDs (no 'json' at the beginning or something, just plain array- always!) in the right order, nothing else.`,
+        content: `Here is a search query: "${query}". this is a query out of e-commerce site, so your role is to find the best match out of the product you will get to this query. sometimes you will get the prices as well (e.g- 'אייפון מהדגם הכי חדש שיש בחנות 2000 ש''ח'), dont let it affect your answer. Please reorder the following products based on their descriptions' and names relevance to the query. Return the reordered list as an array of the 8 most relevant products by their product IDs in the order they should appear. answer only with the array of product IDs (no 'json' at the beginning or something, just plain array- always!) in the right order, nothing else.`,
       },
       {
         role: "user",
