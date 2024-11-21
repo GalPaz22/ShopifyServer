@@ -364,6 +364,7 @@ async function reorderResultsWithGPT(combinedResults, query) {
     const productData = combinedResults.map((product) => ({
       id: product._id.toString(),
       description: product.description || "No description",
+      name: product.name || "No name",
     }));
 
     const messages = [
