@@ -5,6 +5,12 @@ import { OpenAI } from "openai";
 import cors from "cors";
 import dotenv from "dotenv";
 
+import Anthropic from '@anthropic-ai/sdk';
+
+const anthropicClient = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY, // defaults to process.env["ANTHROPIC_API_KEY"]
+});
+
 dotenv.config();
 
 const app = express();
@@ -12,7 +18,7 @@ app.use(bodyParser.json());
 app.use(cors({ origin: "*" }));
 
 // Initialize OpenAI client
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({apiKey: process.env.OPENAI_API_KEY});
 const mongodbUri = process.env.MONGODB_URI;
 let client;
 
@@ -20,37 +26,76 @@ const buildAutocompletePipeline = (query, indexName, path) => {
   // Regular expression to check if the query contains any digits
   const hasNumbers = /\d/.test(query);
 
-  // Construct the autocomplete options based on the presence of numbers
-  const autocompleteOptions = {
-    query: query, // The input query string
-    path: path,   // Field to search (e.g., "name" or "description")
-  };
+  // Construct the pipeline
+  const pipeline = [];
 
-  // If the query does not contain numbers, enable fuzzy matching
-  if (!hasNumbers) {
-    autocompleteOptions.fuzzy = { maxEdits: 2 };
+  if (hasNumbers) {
+    // Use a strict phrase match with a fallback to autocomplete
+    pipeline.push({
+      $search: {
+        index: indexName,
+        compound: {
+          should: [
+            {
+              phrase: {
+                query: query, // Exact phrase match
+                path: path,   // Field to search (e.g., "name" or "description")
+              },
+            },
+            {
+              text: {
+                query: query,
+                path: path,
+                fuzzy: {
+                  maxEdits: 1, // Minimal fuzziness for close matches
+                  prefixLength: 3, // More prefix match
+                },
+              },
+            },
+          ],
+          minimumShouldMatch: 1, // At least one condition must match
+        },
+      },
+    });
+
+    // Add an exact `$match` stage to filter out unwanted partial matches
+    pipeline.push({
+      $match: {
+        [path]: query, // Ensure the field matches the exact query
+      },
+    });
+  } else {
+    // Use fuzzy autocomplete for queries without numbers
+    pipeline.push({
+      $search: {
+        index: indexName,
+        autocomplete: {
+          query: query, // The input query string
+          path: path,   // Field to search (e.g., "name" or "description")
+          fuzzy: { maxEdits: 2 }, // Enable fuzzy matching for text queries
+        },
+      },
+    });
   }
 
-  return [
-    {
-      $search: {
-        index: indexName, // Specific autocomplete index
-        autocomplete: autocompleteOptions,
-      },
-    },
+  // Limit results and project necessary fields
+  pipeline.push(
     { $limit: 10 },
     {
       $project: {
         _id: 0,
-        suggestion: `$${path}`, 
+        suggestion: `$${path}`,
         score: { $meta: "searchScore" },
         url: 1,
         image: 1,
-        price: 1, // Project only the necessary fields
+        price: 1,
       },
-    },
-  ];
+    }
+  );
+
+  return pipeline;
 };
+
 
 // Autocomplete endpoint to fetch suggestions from two different collections
 app.get("/autocomplete", async (req, res) => {
@@ -127,14 +172,28 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
     {
       $search: {
         index: "default",
-        text: {
-          query: cleanedHebrewText,
-          path: ["name","description"],
-          fuzzy: {
-            maxEdits: 2,
-            prefixLength: 0,
-            maxExpansions: 50,
-          },
+        compound: {
+          must: [
+            {
+              phrase: {
+                query: cleanedHebrewText,
+                path: ["name", "description"],
+              },
+            },
+          ],
+          should: [
+            {
+              text: {
+                query: cleanedHebrewText,
+                path: ["name", "description"],
+                fuzzy: {
+                  maxEdits: 1, // Reduce edits for stricter matching
+                  prefixLength: 3, // Require more prefix match
+                  maxExpansions: 20, // Lower expansions for narrower results
+                },
+              },
+            },
+          ],
         },
       },
     },
@@ -144,10 +203,9 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
     const matchStage = {};
 
     if (filters.category ?? null) {
-      // Check if the category is an array or a single string
       matchStage.category = Array.isArray(filters.category)
-        ? { $in: filters.category } // If it's an array, use $in
-        : filters.category; // Otherwise, just match the single value
+        ? { $in: filters.category }
+        : filters.category;
     }
     if (filters.type ?? null) {
       matchStage.type = { $regex: filters.type, $options: "i" };
@@ -160,20 +218,21 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
       matchStage.price = { $lte: filters.maxPrice };
     }
     if (filters.price) {
-        const price = filters.price;
-        const priceRange = price * 0.15; // 15% of the price
-        matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
-      }
+      const price = filters.price;
+      const priceRange = price * 0.15;
+      matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
+    }
 
     if (Object.keys(matchStage).length > 0) {
       pipeline.push({ $match: matchStage });
     }
   }
 
-  pipeline.push({ $limit: 20 }); // Increase limit for better RRF results
+  pipeline.push({ $limit: 20 });
 
   return pipeline;
 };
+
 
 const buildVectorSearchPipeline = (queryEmbedding, filters) => {
   const pipeline = [
@@ -358,54 +417,66 @@ async function logQuery(queryCollection, query, filters) {
 }
 
 
-async function reorderResultsWithGPT(combinedResults, query) {
+async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = []) {
   try {
-    // Prepare an array of objects containing only product IDs and descriptions
-    const productData = combinedResults.map((product) => ({
+    // Ensure `alreadyDelivered` is an array
+    if (!Array.isArray(alreadyDelivered)) {
+      alreadyDelivered = [];
+    }
+
+    // Filter out products that have already been delivered
+    const filteredResults = combinedResults.filter(
+      (product) => !alreadyDelivered.includes(product._id.toString())
+    );
+
+    // Prepare an array of objects containing only product IDs and descriptions for remaining items
+    const productData = filteredResults.map((product) => ({
       id: product._id.toString(),
       description: product.description || "No description",
       name: product.name || "No name",
     }));
 
     const messages = [
+     
       {
         role: "user",
-        content: `Here is a search query: "${query}". this is a query out of e-commerce site, so your role is to find the best match out of the product you will get to this query. sometimes you will get the prices as well (e.g- 'אייפון מהדגם הכי חדש שיש בחנות 2000 ש''ח'), dont let it affect your answer. Please reorder the following products based on their descriptions' and names relevance to the query. Return the reordered list as an array of the 8 most relevant products by their product IDs in the order they should appear. answer only with the array of product IDs (no 'json' at the beginning or something, just plain array- always!) in the right order, nothing else.`,
+        content: `Here is a search query: "${query}". Please reorder the following products based on their descriptions' and names relevance to the query and return the most relevant 8 products. Return the reordered list as an array of 8 product IDs in the order they should appear. Answer only with the array of product IDs (no 'json' at the beginning or something, just plain array—always, and in the right order, nothing else). do not send it as json but as array, always! e.g. ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]`,
       },
       {
         role: "user",
-        content: JSON.stringify(productData, null, 2), // Send only ID and description
+        content: JSON.stringify(productData,null, 3), // Send only ID and description
       },
     ];
 
-    // Send the request to GPT-4
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
+    // Send the request to Claude 3.5 Sonnet using the Messages API
+    const response = await anthropicClient.messages.create({
+      model: "claude-3-5-sonnet-20241022", // Specify the Claude model version
       messages: messages,
-      temperature: 0.7,
+      system: "You are a helpful assistant that reorders products based on relevance to a search query. you will get e commerce queries and you should sort the best matches to this querry out of the products you get. your answer should be an array of product IDs in the order they should appear.",
+      temperature: 0.1,
+      max_tokens: 2000,
     });
 
     // Extract and parse the reordered product IDs
-    const reorderedText = response.choices[0]?.message?.content;
-   
-    
-    if (!reorderedText) {
-      throw new Error("No content returned from GPT-4");
-    }
+    const reorderedText = response.content[0].text;
+    console.log("Reordered IDs text:", reorderedText);
 
     // Parse the response which should be an array of product IDs
     const reorderedIds = JSON.parse(reorderedText);
-    
+
     if (!Array.isArray(reorderedIds)) {
-      throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
+      throw new Error("Invalid response format from Claude 3.5. Expected an array of IDs.");
     }
 
     return reorderedIds;
   } catch (error) {
-    console.error("Error reordering results with GPT:", error);
+    console.error("Error reordering results with Claude:", error);
     throw error;
   }
 }
+
+
+
 
 
 
