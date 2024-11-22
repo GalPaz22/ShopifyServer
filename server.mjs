@@ -8,7 +8,7 @@ import dotenv from "dotenv";
 import Anthropic from '@anthropic-ai/sdk';
 
 const anthropicClient = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY, // defaults to process.env["ANTHROPIC_API_KEY"]
+  apiKey: process.env["ANTHROPIC_API_KEY"], // defaults to process.env["ANTHROPIC_API_KEY"]
 });
 
 dotenv.config();
