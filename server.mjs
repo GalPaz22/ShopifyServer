@@ -7,9 +7,6 @@ import dotenv from "dotenv";
 
 import Anthropic from '@anthropic-ai/sdk';
 
-const anthropicClient = new Anthropic({
-  apiKey: process.env["ANTHROPIC_API_KEY"], // defaults to process.env["ANTHROPIC_API_KEY"]
-});
 
 dotenv.config();
 
@@ -17,6 +14,7 @@ const app = express();
 app.use(bodyParser.json());
 app.use(cors({ origin: "*" }));
 
+const anthropicClient = new Anthropic();
 // Initialize OpenAI client
 const openai = new OpenAI({apiKey: process.env.OPENAI_API_KEY});
 const mongodbUri = process.env.MONGODB_URI;
