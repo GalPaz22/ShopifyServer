@@ -428,7 +428,7 @@ async function reorderResultsWithGPT(combinedResults, query) {
     const messages = [
       {
         role: "user",
-        content: `Here is a search query: "${query}". This query originates from an e-commerce site, and your role is to identify the 9 most relevant products based on their names and descriptions. You will be provided with up to 24 products, and your task is to select and return the top 9 that best match the query. Please ignore any price details that may appear in the query (e.g., 'אייפון מהדגם הכי חדש שיש בחנות 2000 ש''ח') as they should not influence your decision. Return the IDs of the 9 most relevant products in the correct order of relevance as an array. The response should contain only the plain array of product IDs, nothing else.`,
+        content: `Here is a search query: "${query}". This query originates from an e-commerce site, and your role is to identify the 9 most relevant products based on their names and descriptions. You will be provided with up to 24 products, and your task is to select and return the top 9 that best match the query. Please ignore any price details that may appear in the query (e.g., 'אייפון מהדגם הכי חדש שיש בחנות 2000 ש''ח') as they should not influence your decision. Return the IDs of the 9 most relevant products in the correct order of relevance as an array. The response should contain only the plain array of product IDs, nothing else. dont you ever write 'json' at the beginning, answer only with the array!`,
       },
       {
         role: "user",
