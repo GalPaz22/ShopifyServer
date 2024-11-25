@@ -444,7 +444,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
 
         Ignore any pricing details in the query (e.g., "under $20" or "בין 200-400 ש''ח") as all the products provided are already price-filtered. Do not let pricing information influence your ranking in any way.
         
-        Return the reordered list as an array of 8 product IDs (always exactly 8 products) ordered by their relevance to the query. The response should consist of only the array of product IDs, formatted as a plain array (e.g., ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]).
+        Return the reordered list as an array of 8 product IDs (always exactly 8 products) ordered by their relevance to the query. even though you get input products in json, The response should consist of only the array of product IDs, formatted as a plain array (e.g., ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]- no 'json' what so ever!!).
         
         Important rules for the response:
         
