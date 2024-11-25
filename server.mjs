@@ -415,64 +415,56 @@ async function logQuery(queryCollection, query, filters) {
 }
 
 
-async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = []) {
+async function reorderResultsWithGPT(combinedResults, query) {
   try {
-    // Ensure `alreadyDelivered` is an array
-    if (!Array.isArray(alreadyDelivered)) {
-      alreadyDelivered = [];
-    }
-
-    // Filter out products that have already been delivered
-    const filteredResults = combinedResults.filter(
-      (product) => !alreadyDelivered.includes(product._id.toString())
-    );
-
-    // Prepare an array of objects containing only product IDs and descriptions for remaining items
-    const productData = filteredResults.map((product) => ({
+    // Prepare an array of objects containing only product IDs and descriptions
+    const productData = combinedResults.map((product) => ({
       id: product._id.toString(),
       description: product.description || "No description",
       name: product.name || "No name",
-      description1: product.description1 || "No description",
+      description1: product.description1 || "No description", 
     }));
 
     const messages = [
-     
       {
         role: "user",
-        content: `Here is a search query: "${query}". Please reorder the following products based on their descriptions' and names relevance to the query and return the most relevant 8 products. Return the reordered list as an array of 8 product IDs in the order they should appear. Answer only with the array of product IDs (no 'json' at the beginning or something, just plain array—always, and in the right order, nothing else). do not send it as json but as array, always! e.g. ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]`,
+        content: `Here is a search query: "${query}". This query originates from an e-commerce site, and your role is to identify the 9 most relevant products based on their names and descriptions. You will be provided with up to 24 products, and your task is to select and return the top 9 that best match the query. Please ignore any price details that may appear in the query (e.g., 'אייפון מהדגם הכי חדש שיש בחנות 2000 ש''ח') as they should not influence your decision. Return the IDs of the 9 most relevant products in the correct order of relevance as an array. The response should contain only the plain array of product IDs, nothing else.`,
       },
       {
         role: "user",
-        content: JSON.stringify(productData,null, 4), // Send only ID and description
+        content: JSON.stringify(productData, null, 4), // Send only ID and description
       },
     ];
 
-    // Send the request to Claude 3.5 Sonnet using the Messages API
-    const response = await anthropicClient.messages.create({
-      model: "claude-3-5-sonnet-20241022", // Specify the Claude model version
+    // Send the request to GPT-4
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
       messages: messages,
-      system: "You are a helpful assistant that reorders products based on relevance to a search query. you will get e commerce queries and you should sort the best matches to this querry out of the products you get. your answer should be an array of product IDs in the order they should appear.",
-      temperature: 0.1,
-      max_tokens: 2000,
+      temperature: 0.7,
     });
 
     // Extract and parse the reordered product IDs
-    const reorderedText = response.content[0].text;
-    console.log("Reordered IDs text:", reorderedText);
+    const reorderedText = response.choices[0]?.message?.content;
+   
+    
+    if (!reorderedText) {
+      throw new Error("No content returned from GPT-4");
+    }
 
     // Parse the response which should be an array of product IDs
     const reorderedIds = JSON.parse(reorderedText);
-
+    
     if (!Array.isArray(reorderedIds)) {
-      throw new Error("Invalid response format from Claude 3.5. Expected an array of IDs.");
+      throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
     }
 
     return reorderedIds;
   } catch (error) {
-    console.error("Error reordering results with Claude:", error);
+    console.error("Error reordering results with GPT:", error);
     throw error;
   }
 }
+
 
 
 
@@ -637,7 +629,7 @@ app.post("/search", async (req, res) => {
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 50); // Get the top 12 results
+      .slice(0, 24); // Get the top 12 results
 
     // Reorder the results with GPT-4 based on description relevance to the query
     const reorderedIds = await reorderResultsWithGPT(combinedResults, query);
