@@ -475,8 +475,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       throw new Error("No content returned from GPT-4");
     }
 
-    // Attempt to clean the response if it includes unexpected characters
-    const cleanedText = reorderedText.trim().replace(/[^,\[\]"\w]/g, "");
+    const cleanedText = reorderedText.trim().replace(/[^,\[\]"'\w]/g, "").replace(/json/gi, "");
 
     try {
       // Parse the cleaned response which should be an array of product IDs
