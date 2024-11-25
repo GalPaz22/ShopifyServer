@@ -434,7 +434,6 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       description: product.description || "No description",
       description1: product.description1 || "No description",
       price: product.price || "No price",
-      
     }));
 
     const messages = [
@@ -443,11 +442,11 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
         content: `${query}". Please reorder the following products based on their descriptions' and names' relevance to the query, and return the most relevant 8 products.
 
         Ignore any pricing details in the query (e.g., "under $20" or "בין 200-400 ש''ח") as all the products provided are already price-filtered. Do not let pricing information influence your ranking in any way.
-        
+
         Return the reordered list as an array of 8 product IDs (always exactly 8 products) ordered by their relevance to the query. The response should consist of only the array of product IDs, formatted as a plain array (e.g., ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]).
-        
+
         Important rules for the response:
-        
+
         Never write "json" or any other text at the beginning or end of the response.
         Do not include phrases like "the best matches are:" or any additional explanations.
         Always respond with a plain array, in the correct order, and nothing else.
@@ -465,7 +464,6 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
       messages: messages,
       temperature: 0.1,
-      response_format: { type: "json_object" },
     });
 
     // Extract and parse the reordered product IDs
@@ -476,25 +474,23 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       throw new Error("No content returned from GPT-4");
     }
 
-    // Attempt to clean the response if it includes unexpected characters
-  
+    // Parse the response as an object with repeated keys
+    const idObject = JSON.parse(reorderedText);
 
-    try {
-      // Parse the cleaned response which should be an array of product IDs
-      const reorderedIds = reorderedText
-      if (!Array.isArray(reorderedIds)) {
-        throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
-      }
-      return reorderedIds;
-    } catch (parseError) {
-      console.error("Failed to parse GPT-4 response:", parseError, "Cleaned Text:", cleanedText);
-      throw new Error("Response from GPT-4 could not be parsed as a valid array.");
+    // Transform the object into an array of IDs
+    const reorderedIds = Object.values(idObject);
+
+    if (!Array.isArray(reorderedIds)) {
+      throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
     }
+
+    return reorderedIds;
   } catch (error) {
     console.error("Error reordering results with GPT:", error);
     throw error;
   }
 }
+
 
 
 
