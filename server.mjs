@@ -122,7 +122,7 @@ app.get("/autocomplete", async (req, res) => {
     ]);
 
     // Adjust scores for product suggestions to prioritize them
-    const scoreMultiplier = 2; // Adjust this multiplier as needed
+    const scoreMultiplier = 1; // Adjust this multiplier as needed
 
     const labeledSuggestions1 = suggestions1.map(item => ({ 
       suggestion: item.suggestion, 
@@ -415,24 +415,35 @@ async function logQuery(queryCollection, query, filters) {
 }
 
 
-async function reorderResultsWithGPT(combinedResults, query) {
+async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = []) {
   try {
-    // Prepare an array of objects containing only product IDs and descriptions
-    const productData = combinedResults.map((product) => ({
+    // Ensure `alreadyDelivered` is an array
+    if (!Array.isArray(alreadyDelivered)) {
+      alreadyDelivered = [];
+    }
+
+    // Filter out products that have already been delivered
+    const filteredResults = combinedResults.filter(
+      (product) => !alreadyDelivered.includes(product._id.toString())
+    );
+
+    // Prepare an array of objects containing only product IDs and descriptions for remaining items
+    const productData = filteredResults.map((product) => ({
       id: product._id.toString(),
-      description: product.description || "No description",
       name: product.name || "No name",
+      description: product.description || "No description",
       description1: product.description1 || "No description",
+      
     }));
 
     const messages = [
       {
         role: "user",
-        content: `Here is a search query: "${query}". This query originates from an e-commerce site, and your role is to identify the 9 most relevant products based on their names and descriptions. You will be provided with up to 24 products, and your task is to select and return the top 9 that best match the query. Please ignore any price details that may appear in the query (e.g., 'אייפון מהדגם הכי חדש שיש בחנות 2000 ש''ח') as they should not influence your decision. Return the IDs of the 9 most relevant products in the correct order of relevance as an array. The response should contain only the plain array of product IDs, nothing else.`,
+        content: `Here is a search query: "${query}". Please reorder the following products based on their descriptions' and names relevance to the query and return the most relevant 8 products. Return the reordered list as an array of 8 product IDs in the order they should appear. Answer only with the array of product IDs (no 'json' at the beginning or something, just plain array - always, and in the right order, nothing else). Never write 'json' or anything else at the beginning! Don't write 'the best matches are:', answer always only with the array!`,
       },
       {
         role: "user",
-        content: JSON.stringify(productData, null, 4), // Send only ID and description
+        content: JSON.stringify(productData, null, 2), // Send only ID and description
       },
     ];
 
@@ -440,31 +451,31 @@ async function reorderResultsWithGPT(combinedResults, query) {
     const response = await openai.chat.completions.create({
       model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
       messages: messages,
-      temperature: 0.7,
+      temperature: 0.1,
     });
 
-    // Extract the content from GPT response
+    // Extract and parse the reordered product IDs
     const reorderedText = response.choices[0]?.message?.content;
+    console.log("Reordered IDs text:", reorderedText);
 
     if (!reorderedText) {
       throw new Error("No content returned from GPT-4");
     }
 
-    // Clean up the response to extract only the array
-    const arrayMatch = reorderedText.match(/\[.*?\]/); // Matches the first array in the text
+    // Attempt to clean the response if it includes unexpected characters
+    const cleanedText = reorderedText.trim().replace(/[^,\[\]"\w]/g, "");
 
-    if (!arrayMatch) {
-      throw new Error("No array found in the response from GPT-4");
+    try {
+      // Parse the cleaned response which should be an array of product IDs
+      const reorderedIds = JSON.parse(cleanedText);
+      if (!Array.isArray(reorderedIds)) {
+        throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
+      }
+      return reorderedIds;
+    } catch (parseError) {
+      console.error("Failed to parse GPT-4 response:", parseError, "Cleaned Text:", cleanedText);
+      throw new Error("Response from GPT-4 could not be parsed as a valid array.");
     }
-
-    // Parse the matched array string into a JavaScript array
-    const reorderedIds = JSON.parse(arrayMatch[0]);
-
-    if (!Array.isArray(reorderedIds)) {
-      throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
-    }
-
-    return reorderedIds;
   } catch (error) {
     console.error("Error reordering results with GPT:", error);
     throw error;
