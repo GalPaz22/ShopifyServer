@@ -440,7 +440,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
     const messages = [
       {
         role: "user",
-        content: `Here is a search query: "${query}". Please reorder the following products based on their descriptions' and names relevance to the query and return the most relevant 8 products. pay attention that some querys will contain price details like 'under 20$'- ignore it always, never take it as a part of your rank (all of the products you will get are already after price filter) Return the reordered list as an array of 8 product IDs in the order they should appear. Answer only with the array of product IDs (no 'json' at the beginning or something, just plain array - always, and in the right order, nothing else). Never write 'json' or anything else at the beginning! Don't write 'the best matches are:', answer always only with the array!`,
+        content: `Here is a search query: "${query}". Please reorder the following products based on their descriptions' and names relevance to the query and return the most relevant 8 products. pay attention that some querys will contain price details like 'under 20$'- ignore it always, never take it as a part of your rank (all of the products you will get are already after price filter). Return the reordered list as an array of 8 product IDs (always return 8 products! ordered cy their relevancy) in the order they should appear. Answer only with the array of product IDs (no 'json' at the beginning or something, just plain array - always, and in the right order, nothing else). Never write 'json' or anything else at the beginning! Don't write 'the best matches are:', answer always only with the array!`,
       },
       {
         role: "user",
