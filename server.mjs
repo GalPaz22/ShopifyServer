@@ -465,6 +465,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
       messages: messages,
       temperature: 0.1,
+      response_format: { type: "json_object" },
     });
 
     // Extract and parse the reordered product IDs
@@ -476,11 +477,11 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
     }
 
     // Attempt to clean the response if it includes unexpected characters
-    const cleanedText = reorderedText.trim().replace(/[^,\[\]"\w]/g, "");
+  
 
     try {
       // Parse the cleaned response which should be an array of product IDs
-      const reorderedIds = JSON.parse(cleanedText);
+      const reorderedIds = reorderedText
       if (!Array.isArray(reorderedIds)) {
         throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
       }
