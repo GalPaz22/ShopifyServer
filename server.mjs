@@ -440,7 +440,19 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
     const messages = [
       {
         role: "user",
-        content: `Here is a search query: "${query}". Please reorder the following products based on their descriptions' and names relevance to the query and return the most relevant 8 products. pay attention that some querys will contain price details like 'under 20$'- ignore it always, never take it as a part of your rank (all of the products you will get are already after price filter). Return the reordered list as an array of 8 product IDs (always return 8 products! ordered cy their relevancy) in the order they should appear. Answer only with the array of product IDs (no 'json' at the beginning or something, just plain array - always, and in the right order, nothing else). Never write 'json' or anything else at the beginning! Don't write 'the best matches are:', answer always only with plain array!- e.g. ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]`,
+        content: `${query}". Please reorder the following products based on their descriptions' and names' relevance to the query, and return the most relevant 8 products.
+
+        Ignore any pricing details in the query (e.g., "under $20" or "בין 200-400 ש''ח") as all the products provided are already price-filtered. Do not let pricing information influence your ranking in any way.
+        
+        Return the reordered list as an array of 8 product IDs (always exactly 8 products) ordered by their relevance to the query. The response should consist of only the array of product IDs, formatted as a plain array (e.g., ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]).
+        
+        Important rules for the response:
+        
+        Never write "json" or any other text at the beginning or end of the response.
+        Do not include phrases like "the best matches are:" or any additional explanations.
+        Always respond with a plain array, in the correct order, and nothing else.
+        Example response format:
+        ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]`,
       },
       {
         role: "user",
