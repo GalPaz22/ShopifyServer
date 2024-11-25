@@ -422,13 +422,13 @@ async function reorderResultsWithGPT(combinedResults, query) {
       id: product._id.toString(),
       description: product.description || "No description",
       name: product.name || "No name",
-      description1: product.description1 || "No description", 
+      description1: product.description1 || "No description",
     }));
 
     const messages = [
       {
         role: "user",
-        content: `Here is a search query: "${query}". This query originates from an e-commerce site, and your role is to identify the 9 most relevant products based on their names and descriptions. You will be provided with up to 24 products, and your task is to select and return the top 9 that best match the query. Please ignore any price details that may appear in the query (e.g., 'אייפון מהדגם הכי חדש שיש בחנות 2000 ש''ח') as they should not influence your decision. Return the IDs of the 9 most relevant products in the correct order of relevance as an array. The response should contain only the plain array of product IDs, nothing else. dont you ever write 'json' at the beginning, answer only with the array!`,
+        content: `Here is a search query: "${query}". This query originates from an e-commerce site, and your role is to identify the 9 most relevant products based on their names and descriptions. You will be provided with up to 24 products, and your task is to select and return the top 9 that best match the query. Please ignore any price details that may appear in the query (e.g., 'אייפון מהדגם הכי חדש שיש בחנות 2000 ש''ח') as they should not influence your decision. Return the IDs of the 9 most relevant products in the correct order of relevance as an array. The response should contain only the plain array of product IDs, nothing else.`,
       },
       {
         role: "user",
@@ -438,22 +438,28 @@ async function reorderResultsWithGPT(combinedResults, query) {
 
     // Send the request to GPT-4
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
+      model: "gpt-4", // Use GPT-4, or "gpt-3.5-turbo" for faster response
       messages: messages,
       temperature: 0.7,
     });
 
-    // Extract and parse the reordered product IDs
+    // Extract the content from GPT response
     const reorderedText = response.choices[0]?.message?.content;
-   
-    
+
     if (!reorderedText) {
       throw new Error("No content returned from GPT-4");
     }
 
-    // Parse the response which should be an array of product IDs
-    const reorderedIds = JSON.parse(reorderedText);
-    
+    // Clean up the response to extract only the array
+    const arrayMatch = reorderedText.match(/\[.*?\]/); // Matches the first array in the text
+
+    if (!arrayMatch) {
+      throw new Error("No array found in the response from GPT-4");
+    }
+
+    // Parse the matched array string into a JavaScript array
+    const reorderedIds = JSON.parse(arrayMatch[0]);
+
     if (!Array.isArray(reorderedIds)) {
       throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
     }
@@ -464,7 +470,6 @@ async function reorderResultsWithGPT(combinedResults, query) {
     throw error;
   }
 }
-
 
 
 
