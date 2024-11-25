@@ -433,6 +433,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       name: product.name || "No name",
       description: product.description || "No description",
       description1: product.description1 || "No description",
+      price: product.price || "No price",
       
     }));
 
@@ -443,7 +444,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       },
       {
         role: "user",
-        content: JSON.stringify(productData, null, 2), // Send only ID and description
+        content: JSON.stringify(productData, null, 5), // Send only ID and description
       },
     ];
 
