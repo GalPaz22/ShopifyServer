@@ -1,5 +1,5 @@
 import express from "express";
-import bodyParser from "body-parser";
+import bodyParser, { text } from "body-parser";
 import { MongoClient, ObjectId } from "mongodb";
 import { OpenAI } from "openai";
 import cors from "cors";
@@ -462,7 +462,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       },
       {
         role: "user",
-        content:[{type: "json", content: JSON.stringify(productData, null, 5)},{type: "image_url", image_url: productData.image}], // Send only ID and description
+        content:[{type: "text", text: JSON.stringify(productData, null, 5)},{type: "image_url", image_url: productData.image}], // Send only ID and description
       },
     ];
 
