@@ -440,7 +440,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
     const messages = [
       {
         role: "user",
-        content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given **query** from an e-commerce site, along with a provided list of products (each including a name and description), and return the **8 most relevant product IDs** based solely on how well the product names and descriptions match the query.
+        content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${query}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **8 most relevant product IDs** based solely on how well the product names and descriptions match the query.
 
 ### Key Instructions:
 
