@@ -440,19 +440,25 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
     const messages = [
       {
         role: "user",
-        content: `${query}". Please reorder the following products based on their descriptions' and names' relevance to the query, and return the most relevant 8 products.
+        content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given **query** from an e-commerce site, along with a provided list of products (each including a name and description), and return the **8 most relevant product IDs** based solely on how well the product names and descriptions match the query.
 
-        Ignore any pricing details in the query (e.g., "under $20" or "בין 200-400 ש''ח") as all the products provided are already price-filtered. Do not let pricing information influence your ranking in any way.
-        
-        Return the reordered list as an array of 8 product IDs (always exactly 8 products) ordered by their relevance to the query. even though you get input products in json, The response should consist of only the array of product IDs, formatted as a plain array (e.g., ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]- no 'json' what so ever!!).
-        
-        Important rules for the response:
-        
-        Never write "json" or any other text at the beginning or end of the response.
-        Do not include phrases like "the best matches are:" or any additional explanations.
-        Always respond with a plain array, in the correct order, and nothing else.
-        Example response format:
-        ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]`,
+### Key Instructions:
+
+1. **Pricing Details**: Ignore any pricing information in the query (e.g., "under $20" or "בין 200-400 ש''ח"). Pricing has already been filtered and should not influence your ranking.
+   
+2. **Output Format**: Your response must be a **plain array** of exactly 8 product IDs, ordered by their relevance to the query. Do not include any other text or formatting. Example format:
+   ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]
+
+3. **Relevance Criteria**: Focus exclusively on the product **names** and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
+
+4. **Strict Output Rules**:
+   - Do not write "json" or any other descriptive text.
+   - Do not include phrases like "the best matches are:" or explanations.
+   - Only respond with the array of product IDs in the specified format.
+
+### Example Response:
+["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]
+`,
       },
       {
         role: "user",
