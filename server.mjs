@@ -434,6 +434,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       description: product.description || "No description",
       description1: product.description1 || "No description",
       price: product.price || "No price",
+      image: product.image || "No image",
       
     }));
 
