@@ -462,7 +462,7 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
       },
       {
         role: "user",
-        content: JSON.stringify(productData, null, 5), // Send only ID and description
+        content:[{type: "json", content: JSON.stringify(productData, null, 5)},{type: "image_url", image_url: productData.image}], // Send only ID and description
       },
     ];
 
