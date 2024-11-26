@@ -1,5 +1,5 @@
 import express from "express";
-import bodyParser, { text } from "body-parser";
+import bodyParser from "body-parser";
 import { MongoClient, ObjectId } from "mongodb";
 import { OpenAI } from "openai";
 import cors from "cors";
