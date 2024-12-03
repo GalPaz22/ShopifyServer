@@ -122,11 +122,11 @@ app.get("/autocomplete", async (req, res) => {
     ]);
 
     // Adjust scores for product suggestions to prioritize them
-    const scoreMultiplier = 1; // Adjust this multiplier as needed
+    // Adjust this multiplier as needed
 
     const labeledSuggestions1 = suggestions1.map(item => ({ 
       suggestion: item.suggestion, 
-      score: item.score * scoreMultiplier, // Boost the score
+      score: item.score , // Boost the score
       source: collectionName1,
       url: item.url,
       price: item.price,
