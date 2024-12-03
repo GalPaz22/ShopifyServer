@@ -444,12 +444,12 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
 
 ### Key Instructions:
 
-1. **Pricing Details**: Ignore any pricing information in the query (e.g., "under $20" or "בין 200-400 ש''ח"). Pricing has already been filtered and should not influence your ranking.
+1. **Pricing Details**: Ignore any pricing information in the query (e.g., "under $20" or "בין 200-400 ש''ח"). Pricing has already been filtered and should not influence your ranking- so always return 8 most relevant product IDs!
    
 2. **Output Format**: Your response must be a **plain array** of exactly 8 product IDs, ordered by their relevance to the query. Do not include any other text or formatting. Example format:
    ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]
 
-3. **Relevance Criteria**: Focus exclusively on the product **names** and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
+3. **Relevance Criteria**: Focus exclusively on the product **names**, **descriptions1** and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
 
 4. **Strict Output Rules**:
    - Do not write "json" or any other descriptive text.
