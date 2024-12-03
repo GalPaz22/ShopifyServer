@@ -21,60 +21,23 @@ const mongodbUri = process.env.MONGODB_URI;
 let client;
 
 const buildAutocompletePipeline = (query, indexName, path) => {
-  // Regular expression to check if the query contains any digits
-  const hasNumbers = /\d/.test(query);
-
   // Construct the pipeline
   const pipeline = [];
 
-  if (hasNumbers) {
-    // Use a strict phrase match with a fallback to autocomplete
-    pipeline.push({
-      $search: {
-        index: indexName,
-        compound: {
-          should: [
-            {
-              phrase: {
-                query: query, // Exact phrase match
-                path: path,   // Field to search (e.g., "name" or "description")
-              },
-            },
-            {
-              text: {
-                query: query,
-                path: path,
-                fuzzy: {
-                  maxEdits: 1, // Minimal fuzziness for close matches
-                  prefixLength: 3, // More prefix match
-                },
-              },
-            },
-          ],
-          minimumShouldMatch: 1, // At least one condition must match
+  // Use fuzzy autocomplete for all queries
+  pipeline.push({
+    $search: {
+      index: indexName,
+      autocomplete: {
+        query: query, // The input query string
+        path: path,   // Field to search (e.g., "name" or "description")
+        fuzzy: {
+          maxEdits: 2,      // Allow up to 2 edits for flexibility
+          prefixLength: 2,  // Require at least 2 matching characters as prefix
         },
       },
-    });
-
-    // Add an exact `$match` stage to filter out unwanted partial matches
-    pipeline.push({
-      $match: {
-        [path]: query, // Ensure the field matches the exact query
-      },
-    });
-  } else {
-    // Use fuzzy autocomplete for queries without numbers
-    pipeline.push({
-      $search: {
-        index: indexName,
-        autocomplete: {
-          query: query, // The input query string
-          path: path,   // Field to search (e.g., "name" or "description")
-          fuzzy: { maxEdits: 2 }, // Enable fuzzy matching for text queries
-        },
-      },
-    });
-  }
+    },
+  });
 
   // Limit results and project necessary fields
   pipeline.push(
@@ -93,6 +56,7 @@ const buildAutocompletePipeline = (query, indexName, path) => {
 
   return pipeline;
 };
+
 
 
 // Autocomplete endpoint to fetch suggestions from two different collections
