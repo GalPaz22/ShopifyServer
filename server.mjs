@@ -171,14 +171,6 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
       $search: {
         index: "default",
         compound: {
-          must: [
-            {
-              phrase: {
-                query: cleanedHebrewText,
-                path: ["name", "description"],
-              },
-            },
-          ],
           should: [
             {
               text: {
