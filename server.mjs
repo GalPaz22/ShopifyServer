@@ -191,7 +191,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
 
   if (filters && Object.keys(filters).length > 0) {
     const matchStage = {};
-
+  
     if (filters.category ?? null) {
       matchStage.category = Array.isArray(filters.category)
         ? { $in: filters.category }
@@ -209,10 +209,16 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
     }
     if (filters.price) {
       const price = filters.price;
-      const priceRange = price * 0.15;
+      const priceRange = price * 0.15; // 15% of the price
       matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
     }
-
+  
+    // Check for `stockStatus` field and ensure it's `instock`
+    matchStage.$or = [
+      { stockStatus: { $exists: false } }, // Include documents without `stockStatus`
+      { stockStatus: "instock" } // Include only documents where `stockStatus` is `instock`
+    ];
+  
     if (Object.keys(matchStage).length > 0) {
       pipeline.push({ $match: matchStage });
     }
@@ -239,12 +245,11 @@ const buildVectorSearchPipeline = (queryEmbedding, filters) => {
 
   if (filters && Object.keys(filters).length > 0) {
     const matchStage = {};
-
+  
     if (filters.category ?? null) {
-      // Check if the category is an array or a single string
       matchStage.category = Array.isArray(filters.category)
-        ? { $in: filters.category } // If it's an array, use $in
-        : filters.category; // Otherwise, just match the single value
+        ? { $in: filters.category }
+        : filters.category;
     }
     if (filters.type ?? null) {
       matchStage.type = { $regex: filters.type, $options: "i" };
@@ -257,11 +262,17 @@ const buildVectorSearchPipeline = (queryEmbedding, filters) => {
       matchStage.price = { $lte: filters.maxPrice };
     }
     if (filters.price) {
-        const price = filters.price;
-        const priceRange = price * 0.15; // 15% of the price
-        matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
-      }
-
+      const price = filters.price;
+      const priceRange = price * 0.15; // 15% of the price
+      matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
+    }
+  
+    // Check for `stockStatus` field and ensure it's `instock`
+    matchStage.$or = [
+      { stockStatus: { $exists: false } }, // Include documents without `stockStatus`
+      { stockStatus: "instock" } // Include only documents where `stockStatus` is `instock`
+    ];
+  
     if (Object.keys(matchStage).length > 0) {
       pipeline.push({ $match: matchStage });
     }
