@@ -434,9 +434,9 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
 
     // Send the request to GPT-4
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
+      model: "o1-mini", // Use GPT-4, or "gpt-3.5-turbo" for faster response
       messages: messages,
-      temperature: 0.1,
+
     });
 
     // Extract and parse the reordered product IDs
