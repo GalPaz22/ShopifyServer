@@ -382,7 +382,7 @@ async function logQuery(queryCollection, query, filters) {
 }
 
 
-async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = []) {
+async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDelivered = []) {
   try {
     // Ensure `alreadyDelivered` is an array
     if (!Array.isArray(alreadyDelivered)) {
@@ -398,16 +398,15 @@ async function reorderResultsWithGPT(combinedResults, query, alreadyDelivered = 
     const productData = filteredResults.map((product) => ({
       id: product._id.toString(),
       name: product.name || "No name",
-      description: product.description || "No description",
       description1: product.description1 || "No description",
-      price: product.price || "No price",
+   
       
     }));
 
     const messages = [
       {
         role: "user",
-        content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${query}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **8 most relevant product IDs** based solely on how well the product names and descriptions match the query.
+        content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **8 most relevant product IDs** based solely on how well the product names and descriptions match the query.
 
 ### Key Instructions:
 
@@ -630,10 +629,10 @@ app.post("/search", async (req, res) => {
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 24); // Get the top 12 results
+      .slice(0, 15); // Get the top 12 results
 
     // Reorder the results with GPT-4 based on description relevance to the query
-    const reorderedIds = await reorderResultsWithGPT(combinedResults, query);
+    const reorderedIds = await reorderResultsWithGPT(combinedResults, translatedQuery);
     const orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
 
     // Format results
