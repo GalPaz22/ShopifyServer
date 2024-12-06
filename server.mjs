@@ -33,7 +33,7 @@ const buildAutocompletePipeline = (query, indexName, path) => {
         path: path,   // Field to search (e.g., "name" or "description")
         fuzzy: {
           maxEdits: 2,      // Allow up to 2 edits for flexibility
-          prefixLength: 2,  // Require at least 2 matching characters as prefix
+          prefixLength: 3,  // Require at least 2 matching characters as prefix
         },
       },
     },
