@@ -394,32 +394,26 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
       (product) => !alreadyDelivered.includes(product._id.toString())
     );
 
-    // Prepare an array of objects containing only product IDs and descriptions for remaining items
+    // Prepare an array of objects containing only product IDs and descriptions
     const productData = filteredResults.map((product) => ({
       id: product._id.toString(),
       name: product.name || "No name",
-      description1: product.description1 || "No description",
-      // Add other relevant fields if necessary
+      description1: product.description1 || "No description"
     }));
 
     const messages = [
-      {
-        role: "system",
-        content: `You are ChatGPT, a large language model trained by OpenAI. 
-        Please follow the instructions below strictly without adding any additional text or explanations.`,
-      },
       {
         role: "user",
         content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **8 most relevant product IDs** based solely on how well the product names and descriptions match the query.
 
 ### Key Instructions:
 
-1. **Pricing Details**: Ignore any pricing information in the query (e.g., "under $20" or "בין 200-400 ש''ח"). Pricing has already been filtered and should not influence your ranking—so always return 8 most relevant product IDs!
-
+1. **Pricing Details**: Ignore any pricing information in the query (e.g., "under $20" or "בין 200-400 ש''ח"). Pricing has already been filtered and should not influence your ranking- so always return 8 most relevant product IDs!
+   
 2. **Output Format**: Your response must be a **plain array** of exactly 8 product IDs, ordered by their relevance to the query. Do not include any other text or formatting. Example format:
    ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]
 
-3. **Relevance Criteria**: Focus exclusively on the product **names**, **descriptions1**, and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
+3. **Relevance Criteria**: Focus exclusively on the product **names**, **descriptions1** and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
 
 4. **Strict Output Rules**:
    - Do not write "json" or any other descriptive text.
@@ -427,48 +421,38 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
    - Only respond with the array of product IDs in the specified format.
 
 ### Example Response:
-["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]
-`,
+["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]`
       },
       {
         role: "user",
-        content: JSON.stringify(productData, null, 2), // Send only ID and description
-      },
+        content: JSON.stringify(productData, null, 5) // Only ID and description
+      }
     ];
 
-    // Send the request to GPT-4 with a timeout to prevent hanging
-    const response = await Promise.race([
-      openai.chat.completions.create({
-        model: "gpt-4o", // Ensure this is the correct model identifier
-        messages: messages,
-        temperature: 0.1,
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("LLM request timed out")), 10000) // 10 seconds timeout
-      ),
-    ]);
+    // Send the request to GPT-4
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: messages,
+      temperature: 0.1,
+    });
 
     // Extract and parse the reordered product IDs
     const reorderedText = response.choices[0]?.message?.content;
     console.log("Reordered IDs text:", reorderedText);
 
     if (!reorderedText) {
-      throw new Error("No content returned from GPT-4");
+      console.warn("No content returned from GPT-4, falling back to original results.");
+      return combinedResults.slice(0, 8).map(product => product._id.toString());
     }
 
-    // Clean the response text to extract JSON array
+    // Attempt to clean and parse the response
     const cleanedText = reorderedText.trim().replace(/[^,\[\]"'\w]/g, "").replace(/json/gi, "");
-
     let reorderedIds;
     try {
-      // Parse the cleaned response which should be an array of product IDs
       reorderedIds = JSON.parse(cleanedText);
-      if (!Array.isArray(reorderedIds)) {
-        throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
-      }
     } catch (parseError) {
-      console.error("Failed to parse GPT-4 response:", parseError, "Cleaned Text:", cleanedText);
-      throw new Error("Response from GPT-4 could not be parsed as a valid array.");
+      console.warn("Failed to parse GPT-4 response, falling back to original results:", parseError, "Cleaned Text:", cleanedText);
+      return combinedResults.slice(0, 8).map(product => product._id.toString());
     }
 
     // Validate the reordered IDs
@@ -479,17 +463,17 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
 
     // Verify that the reordered IDs exist in combinedResults
     const validIds = reorderedIds.filter(id => combinedResults.some(product => product._id.toString() === id));
-
     if (validIds.length === 0) {
       console.warn("No valid IDs returned from LLM. Falling back to original results.");
       return combinedResults.slice(0, 8).map(product => product._id.toString());
     }
 
-    // Return the first 8 valid IDs
+    // Return only the first 8 valid IDs
     return validIds.slice(0, 8);
+
   } catch (error) {
     console.error("Error reordering results with GPT:", error);
-    // Fallback to original combinedResults in case of error
+    // Fallback if any error occurs
     return combinedResults.slice(0, 8).map(product => product._id.toString());
   }
 }
@@ -602,22 +586,12 @@ app.post("/search", async (req, res) => {
     console.log("noHebrewWord:", noHebrewWord);
     console.log("Cleaned query for fuzzy search:", cleanedHebrewText);
 
-    const fuzzySearchPipeline = buildFuzzySearchPipeline(
-      cleanedHebrewText,
-      filters
-    );
-    const fuzzyResults = await collection
-      .aggregate(fuzzySearchPipeline)
-      .toArray();
+    const fuzzySearchPipeline = buildFuzzySearchPipeline(cleanedHebrewText, filters);
+    const fuzzyResults = await collection.aggregate(fuzzySearchPipeline).toArray();
 
     // Perform vector search
-    const vectorSearchPipeline = buildVectorSearchPipeline(
-      queryEmbedding,
-      filters
-    );
-    const vectorResults = await collection
-      .aggregate(vectorSearchPipeline)
-      .toArray();
+    const vectorSearchPipeline = buildVectorSearchPipeline(queryEmbedding, filters);
+    const vectorResults = await collection.aggregate(vectorSearchPipeline).toArray();
 
     // Create a map to store the best rank for each document
     const documentRanks = new Map();
@@ -648,51 +622,51 @@ app.post("/search", async (req, res) => {
         const doc =
           fuzzyResults.find((d) => d._id.toString() === id) ||
           vectorResults.find((d) => d._id.toString() === id);
+
         return {
           ...doc,
-          rrf_score: calculateRRFScore(
-            ranks.fuzzyRank,
-            ranks.vectorRank,
-            VECTOR_WEIGHT
-          ),
+          rrf_score: calculateRRFScore(ranks.fuzzyRank, ranks.vectorRank, VECTOR_WEIGHT),
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
       .slice(0, 15); // Get the top 15 results
 
-    // Reorder the results with GPT-4 based on description relevance to the query
-    const reorderedIds = await reorderResultsWithGPT(combinedResults, translatedQuery);
+    // Reorder the results with GPT based on relevance
+    let reorderedIds = await reorderResultsWithGPT(combinedResults, translatedQuery);
 
-    // Fetch the ordered products. If reorderedIds are from fallback, they are already in desired order.
-    const orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
+    // If, for some reason, reorderResultsWithGPT doesn't return a valid array, fall back
+    if (!Array.isArray(reorderedIds) || reorderedIds.length === 0) {
+      console.warn("Reordered IDs invalid or empty, falling back to top 8 combinedResults.");
+      reorderedIds = combinedResults.slice(0, 8).map(product => product._id.toString());
+    }
 
-    // If LLM returned fewer than desired results, supplement with remaining combinedResults
-    if (orderedProducts.length < 8) {
-      const missingCount = 8 - orderedProducts.length;
+    // Fetch the ordered products from the database
+    let orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
+
+    // If orderedProducts are empty or fewer than desired, fill in from combinedResults
+    if (!orderedProducts || orderedProducts.length < 8) {
+      console.warn("Fewer than 8 products found after ordering. Filling from combinedResults.");
+      const existingIds = new Set(orderedProducts.map(prod => prod._id.toString()));
+      const needed = 8 - orderedProducts.length;
       const additionalProducts = combinedResults
-        .filter(product => !reorderedIds.includes(product._id.toString()))
-        .slice(0, missingCount)
-        .map(product => product._id.toString());
-
-      const additionalOrdered = await getProductsByIds(additionalProducts, dbName, collectionName);
-      orderedProducts.push(...additionalOrdered);
+        .filter(product => !existingIds.has(product._id.toString()))
+        .slice(0, needed);
+      orderedProducts = orderedProducts.concat(additionalProducts);
     }
 
     // Format results
-    const formattedResults = orderedProducts.map((product) => ({
+    const formattedResults = orderedProducts.slice(0, 8).map((product) => ({
       id: product._id.toString(),
       name: product.name,
-      description: product.description, // Adjusted to use description1 as per LLM instructions
+      description: product.description,
       price: product.price,
       image: product.image,
       url: product.url,
     }));
 
-    // Ensure that the response is sent only once
     res.json(formattedResults);
   } catch (error) {
     console.error("Error handling search request:", error);
-    // If an error occurs, send the response here and ensure you don't send it again later
     if (!res.headersSent) {
       res.status(500).json({ error: "Server error." });
     }
@@ -702,7 +676,6 @@ app.post("/search", async (req, res) => {
     }
   }
 });
-
 
 
 
