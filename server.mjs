@@ -399,23 +399,27 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
       id: product._id.toString(),
       name: product.name || "No name",
       description1: product.description1 || "No description",
-   
-      
+      // Add other relevant fields if necessary
     }));
 
     const messages = [
+      {
+        role: "system",
+        content: `You are ChatGPT, a large language model trained by OpenAI. 
+        Please follow the instructions below strictly without adding any additional text or explanations.`,
+      },
       {
         role: "user",
         content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **8 most relevant product IDs** based solely on how well the product names and descriptions match the query.
 
 ### Key Instructions:
 
-1. **Pricing Details**: Ignore any pricing information in the query (e.g., "under $20" or "בין 200-400 ש''ח"). Pricing has already been filtered and should not influence your ranking- so always return 8 most relevant product IDs!
-   
+1. **Pricing Details**: Ignore any pricing information in the query (e.g., "under $20" or "בין 200-400 ש''ח"). Pricing has already been filtered and should not influence your ranking—so always return 8 most relevant product IDs!
+
 2. **Output Format**: Your response must be a **plain array** of exactly 8 product IDs, ordered by their relevance to the query. Do not include any other text or formatting. Example format:
    ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]
 
-3. **Relevance Criteria**: Focus exclusively on the product **names**, **descriptions1** and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
+3. **Relevance Criteria**: Focus exclusively on the product **names**, **descriptions1**, and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
 
 4. **Strict Output Rules**:
    - Do not write "json" or any other descriptive text.
@@ -428,16 +432,21 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
       },
       {
         role: "user",
-        content: JSON.stringify(productData, null, 5), // Send only ID and description
+        content: JSON.stringify(productData, null, 2), // Send only ID and description
       },
     ];
 
-    // Send the request to GPT-4
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
-      messages: messages,
-      temperature: 0.1,
-    });
+    // Send the request to GPT-4 with a timeout to prevent hanging
+    const response = await Promise.race([
+      openai.chat.completions.create({
+        model: "gpt-4o", // Ensure this is the correct model identifier
+        messages: messages,
+        temperature: 0.1,
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("LLM request timed out")), 10000) // 10 seconds timeout
+      ),
+    ]);
 
     // Extract and parse the reordered product IDs
     const reorderedText = response.choices[0]?.message?.content;
@@ -447,24 +456,44 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
       throw new Error("No content returned from GPT-4");
     }
 
+    // Clean the response text to extract JSON array
     const cleanedText = reorderedText.trim().replace(/[^,\[\]"'\w]/g, "").replace(/json/gi, "");
 
+    let reorderedIds;
     try {
       // Parse the cleaned response which should be an array of product IDs
-      const reorderedIds = JSON.parse(cleanedText);
+      reorderedIds = JSON.parse(cleanedText);
       if (!Array.isArray(reorderedIds)) {
         throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
       }
-      return reorderedIds;
     } catch (parseError) {
       console.error("Failed to parse GPT-4 response:", parseError, "Cleaned Text:", cleanedText);
       throw new Error("Response from GPT-4 could not be parsed as a valid array.");
     }
+
+    // Validate the reordered IDs
+    if (!Array.isArray(reorderedIds) || reorderedIds.length === 0) {
+      console.warn("LLM returned invalid or empty reordered IDs. Falling back to original results.");
+      return combinedResults.slice(0, 8).map(product => product._id.toString());
+    }
+
+    // Verify that the reordered IDs exist in combinedResults
+    const validIds = reorderedIds.filter(id => combinedResults.some(product => product._id.toString() === id));
+
+    if (validIds.length === 0) {
+      console.warn("No valid IDs returned from LLM. Falling back to original results.");
+      return combinedResults.slice(0, 8).map(product => product._id.toString());
+    }
+
+    // Return the first 8 valid IDs
+    return validIds.slice(0, 8);
   } catch (error) {
     console.error("Error reordering results with GPT:", error);
-    throw error;
+    // Fallback to original combinedResults in case of error
+    return combinedResults.slice(0, 8).map(product => product._id.toString());
   }
 }
+
 
 
 
@@ -524,10 +553,9 @@ app.post("/search", async (req, res) => {
     context
   } = req.body;
 
-  if (!query || !dbName || !collectionName ) {
+  if (!query || !dbName || !collectionName) {
     return res.status(400).json({
-      error:
-        "Query, MongoDB URI, database name, collection name, and system prompt are required",
+      error: "Query, database name, and collection name are required",
     });
   }
 
@@ -545,19 +573,19 @@ app.post("/search", async (req, res) => {
       return res.status(500).json({ error: "Error translating query" });
 
     const cleanedText = removeWineFromQuery(translatedQuery, noWord);
-    console.log(noWord);
+    console.log("noWord:", noWord);
     console.log("Cleaned query for embedding:", cleanedText);
+
     // Extract filters from the translated query
     const filters = await extractFiltersFromQuery(query, categories, types, example);
 
-    logQuery(querycollection, query, filters);
+    // Log the query
+    await logQuery(querycollection, query, filters);
 
     // Get query embedding
     const queryEmbedding = await getQueryEmbedding(cleanedText);
     if (!queryEmbedding)
-      return res
-        .status(500)
-        .json({ error: "Error generating query embedding" });
+      return res.status(500).json({ error: "Error generating query embedding" });
 
     const RRF_CONSTANT = 60;
     const VECTOR_WEIGHT = 1;
@@ -571,8 +599,9 @@ app.post("/search", async (req, res) => {
 
     // Perform fuzzy search
     const cleanedHebrewText = removeWordsFromQuery(query, noHebrewWord);
-    console.log(noHebrewWord);
-    console.log("Cleaned query for fuzzy search:", cleanedHebrewText); // Check if cleanedText
+    console.log("noHebrewWord:", noHebrewWord);
+    console.log("Cleaned query for fuzzy search:", cleanedHebrewText);
+
     const fuzzySearchPipeline = buildFuzzySearchPipeline(
       cleanedHebrewText,
       filters
@@ -629,19 +658,31 @@ app.post("/search", async (req, res) => {
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 15); // Get the top 12 results
+      .slice(0, 15); // Get the top 15 results
 
     // Reorder the results with GPT-4 based on description relevance to the query
     const reorderedIds = await reorderResultsWithGPT(combinedResults, translatedQuery);
+
+    // Fetch the ordered products. If reorderedIds are from fallback, they are already in desired order.
     const orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
 
-    // Format results
-  
+    // If LLM returned fewer than desired results, supplement with remaining combinedResults
+    if (orderedProducts.length < 8) {
+      const missingCount = 8 - orderedProducts.length;
+      const additionalProducts = combinedResults
+        .filter(product => !reorderedIds.includes(product._id.toString()))
+        .slice(0, missingCount)
+        .map(product => product._id.toString());
 
+      const additionalOrdered = await getProductsByIds(additionalProducts, dbName, collectionName);
+      orderedProducts.push(...additionalOrdered);
+    }
+
+    // Format results
     const formattedResults = orderedProducts.map((product) => ({
       id: product._id.toString(),
       name: product.name,
-      description: product.description,
+      description: product.description, // Adjusted to use description1 as per LLM instructions
       price: product.price,
       image: product.image,
       url: product.url,
@@ -655,8 +696,13 @@ app.post("/search", async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ error: "Server error." });
     }
+  } finally {
+    if (client) {
+      await client.close();
+    }
   }
 });
+
 
 
 
