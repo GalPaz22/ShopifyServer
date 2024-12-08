@@ -129,7 +129,7 @@ async function connectToMongoDB(mongodbUri) {
   return client;
 }
 
-const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
+const buildFuzzySearchPipeline = (translatedQuery, filters) => {
   const pipeline = [
     {
       $search: {
@@ -138,8 +138,8 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
           should: [
             {
               text: {
-                query: cleanedHebrewText,
-                path: ["name", "description"],
+                query: translatedQuery,
+                path: ["name", "description1"],
                 fuzzy: {
                   maxEdits: 1, // Reduce edits for stricter matching
                   prefixLength: 3, // Require more prefix match
@@ -577,7 +577,7 @@ app.post("/search", async (req, res) => {
     console.log(noHebrewWord);
     console.log("Cleaned query for fuzzy search:", cleanedHebrewText); // Check if cleanedText
     const fuzzySearchPipeline = buildFuzzySearchPipeline(
-      cleanedHebrewText,
+      translatedQuery,
       filters
     );
     const fuzzyResults = await collection
