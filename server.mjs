@@ -445,7 +445,6 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
       return combinedResults.slice(0, 8).map(product => product._id.toString());
     }
 
-    // Attempt to clean and parse the response
     const cleanedText = reorderedText.trim().replace(/[^,\[\]"'\w]/g, "").replace(/json/gi, "");
     let reorderedIds;
     try {
@@ -455,30 +454,24 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
       return combinedResults.slice(0, 8).map(product => product._id.toString());
     }
 
-    // Validate the reordered IDs
     if (!Array.isArray(reorderedIds) || reorderedIds.length === 0) {
       console.warn("LLM returned invalid or empty reordered IDs. Falling back to original results.");
       return combinedResults.slice(0, 8).map(product => product._id.toString());
     }
 
-    // Verify that the reordered IDs exist in combinedResults
     const validIds = reorderedIds.filter(id => combinedResults.some(product => product._id.toString() === id));
     if (validIds.length === 0) {
       console.warn("No valid IDs returned from LLM. Falling back to original results.");
       return combinedResults.slice(0, 8).map(product => product._id.toString());
     }
 
-    // Return only the first 8 valid IDs
     return validIds.slice(0, 8);
 
   } catch (error) {
     console.error("Error reordering results with GPT:", error);
-    // Fallback if any error occurs
     return combinedResults.slice(0, 8).map(product => product._id.toString());
   }
 }
-
-
 
 
 
@@ -634,16 +627,15 @@ app.post("/search", async (req, res) => {
     // Reorder the results with GPT based on relevance
     let reorderedIds = await reorderResultsWithGPT(combinedResults, translatedQuery);
 
-    // If, for some reason, reorderResultsWithGPT doesn't return a valid array, fall back
+    // If reorder returns empty or invalid
     if (!Array.isArray(reorderedIds) || reorderedIds.length === 0) {
       console.warn("Reordered IDs invalid or empty, falling back to top 8 combinedResults.");
       reorderedIds = combinedResults.slice(0, 8).map(product => product._id.toString());
     }
 
-    // Fetch the ordered products from the database
     let orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
+    console.log("Ordered Products Count:", orderedProducts.length);
 
-    // If orderedProducts are empty or fewer than desired, fill in from combinedResults
     if (!orderedProducts || orderedProducts.length < 8) {
       console.warn("Fewer than 8 products found after ordering. Filling from combinedResults.");
       const existingIds = new Set(orderedProducts.map(prod => prod._id.toString()));
@@ -654,7 +646,12 @@ app.post("/search", async (req, res) => {
       orderedProducts = orderedProducts.concat(additionalProducts);
     }
 
-    // Format results
+    // Final fallback if still no products
+    if (!orderedProducts || orderedProducts.length === 0) {
+      console.warn("No products found even after fallback. Returning no results message.");
+      return res.json({ message: "No results found." });
+    }
+
     const formattedResults = orderedProducts.slice(0, 8).map((product) => ({
       id: product._id.toString(),
       name: product.name,
@@ -664,6 +661,7 @@ app.post("/search", async (req, res) => {
       url: product.url,
     }));
 
+    console.log("Final returned products:", formattedResults.length);
     res.json(formattedResults);
   } catch (error) {
     console.error("Error handling search request:", error);
@@ -676,7 +674,6 @@ app.post("/search", async (req, res) => {
     }
   }
 });
-
 
 
 app.get("/products", async (req, res) => {
