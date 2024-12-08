@@ -393,12 +393,15 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
     const filteredResults = combinedResults.filter(
       (product) => !alreadyDelivered.includes(product._id.toString())
     );
+    console.log(`Number of products remaining: ${filteredResults}`);
 
-    // Prepare an array of objects containing only product IDs and descriptions
+    // Prepare an array of objects containing only product IDs and descriptions for remaining items
     const productData = filteredResults.map((product) => ({
       id: product._id.toString(),
       name: product.name || "No name",
-      description1: product.description1 || "No description"
+      description1: product.description1 || "No description",
+   
+      
     }));
 
     const messages = [
@@ -421,17 +424,18 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
    - Only respond with the array of product IDs in the specified format.
 
 ### Example Response:
-["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]`
+["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]
+`,
       },
       {
         role: "user",
-        content: JSON.stringify(productData, null, 5) // Only ID and description
-      }
+        content: JSON.stringify(productData, null, 3), // Send only ID and description
+      },
     ];
 
     // Send the request to GPT-4
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
       messages: messages,
       temperature: 0.1,
     });
@@ -441,37 +445,30 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
     console.log("Reordered IDs text:", reorderedText);
 
     if (!reorderedText) {
-      console.warn("No content returned from GPT-4, falling back to original results.");
-      return combinedResults.slice(0, 8).map(product => product._id.toString());
+      throw new Error("No content returned from GPT-4");
     }
 
     const cleanedText = reorderedText.trim().replace(/[^,\[\]"'\w]/g, "").replace(/json/gi, "");
-    let reorderedIds;
+
     try {
-      reorderedIds = JSON.parse(cleanedText);
+      // Parse the cleaned response which should be an array of product IDs
+      const reorderedIds = JSON.parse(cleanedText);
+      if (!Array.isArray(reorderedIds)) {
+        throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
+      } else if (reorderedIds.length < 3) {
+        return combinedResults.map((product) => product._id.toString()).slice(0, 8);
+      }
+      return reorderedIds;
     } catch (parseError) {
-      console.warn("Failed to parse GPT-4 response, falling back to original results:", parseError, "Cleaned Text:", cleanedText);
-      return combinedResults.slice(0, 8).map(product => product._id.toString());
+      console.error("Failed to parse GPT-4 response:", parseError, "Cleaned Text:", cleanedText);
+      throw new Error("Response from GPT-4 could not be parsed as a valid array.");
     }
-
-    if (!Array.isArray(reorderedIds) || reorderedIds.length === 0) {
-      console.warn("LLM returned invalid or empty reordered IDs. Falling back to original results.");
-      return combinedResults.slice(0, 8).map(product => product._id.toString());
-    }
-
-    const validIds = reorderedIds.filter(id => combinedResults.some(product => product._id.toString() === id));
-    if (validIds.length === 0) {
-      console.warn("No valid IDs returned from LLM. Falling back to original results.");
-      return combinedResults.slice(0, 8).map(product => product._id.toString());
-    }
-
-    return validIds.slice(0, 8);
-
   } catch (error) {
     console.error("Error reordering results with GPT:", error);
-    return combinedResults.slice(0, 8).map(product => product._id.toString());
+    throw error;
   }
 }
+
 
 
 
@@ -530,9 +527,10 @@ app.post("/search", async (req, res) => {
     context
   } = req.body;
 
-  if (!query || !dbName || !collectionName) {
+  if (!query || !dbName || !collectionName ) {
     return res.status(400).json({
-      error: "Query, database name, and collection name are required",
+      error:
+        "Query, MongoDB URI, database name, collection name, and system prompt are required",
     });
   }
 
@@ -550,19 +548,19 @@ app.post("/search", async (req, res) => {
       return res.status(500).json({ error: "Error translating query" });
 
     const cleanedText = removeWineFromQuery(translatedQuery, noWord);
-    console.log("noWord:", noWord);
+    console.log(noWord);
     console.log("Cleaned query for embedding:", cleanedText);
-
     // Extract filters from the translated query
     const filters = await extractFiltersFromQuery(query, categories, types, example);
 
-    // Log the query
-    await logQuery(querycollection, query, filters);
+    logQuery(querycollection, query, filters);
 
     // Get query embedding
     const queryEmbedding = await getQueryEmbedding(cleanedText);
     if (!queryEmbedding)
-      return res.status(500).json({ error: "Error generating query embedding" });
+      return res
+        .status(500)
+        .json({ error: "Error generating query embedding" });
 
     const RRF_CONSTANT = 60;
     const VECTOR_WEIGHT = 1;
@@ -576,15 +574,24 @@ app.post("/search", async (req, res) => {
 
     // Perform fuzzy search
     const cleanedHebrewText = removeWordsFromQuery(query, noHebrewWord);
-    console.log("noHebrewWord:", noHebrewWord);
-    console.log("Cleaned query for fuzzy search:", cleanedHebrewText);
-
-    const fuzzySearchPipeline = buildFuzzySearchPipeline(cleanedHebrewText, filters);
-    const fuzzyResults = await collection.aggregate(fuzzySearchPipeline).toArray();
+    console.log(noHebrewWord);
+    console.log("Cleaned query for fuzzy search:", cleanedHebrewText); // Check if cleanedText
+    const fuzzySearchPipeline = buildFuzzySearchPipeline(
+      cleanedHebrewText,
+      filters
+    );
+    const fuzzyResults = await collection
+      .aggregate(fuzzySearchPipeline)
+      .toArray();
 
     // Perform vector search
-    const vectorSearchPipeline = buildVectorSearchPipeline(queryEmbedding, filters);
-    const vectorResults = await collection.aggregate(vectorSearchPipeline).toArray();
+    const vectorSearchPipeline = buildVectorSearchPipeline(
+      queryEmbedding,
+      filters
+    );
+    const vectorResults = await collection
+      .aggregate(vectorSearchPipeline)
+      .toArray();
 
     // Create a map to store the best rank for each document
     const documentRanks = new Map();
@@ -615,44 +622,26 @@ app.post("/search", async (req, res) => {
         const doc =
           fuzzyResults.find((d) => d._id.toString() === id) ||
           vectorResults.find((d) => d._id.toString() === id);
-
         return {
           ...doc,
-          rrf_score: calculateRRFScore(ranks.fuzzyRank, ranks.vectorRank, VECTOR_WEIGHT),
+          rrf_score: calculateRRFScore(
+            ranks.fuzzyRank,
+            ranks.vectorRank,
+            VECTOR_WEIGHT
+          ),
         };
       })
       .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 15); // Get the top 15 results
+      .slice(0, 15); // Get the top 12 results
 
-    // Reorder the results with GPT based on relevance
-    let reorderedIds = await reorderResultsWithGPT(combinedResults, translatedQuery);
+    // Reorder the results with GPT-4 based on description relevance to the query
+    const reorderedIds = await reorderResultsWithGPT(combinedResults, translatedQuery);
+    const orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
+    
+    // Format results
+  
 
-    // If reorder returns empty or invalid
-    if (!Array.isArray(reorderedIds) || reorderedIds.length === 0) {
-      console.warn("Reordered IDs invalid or empty, falling back to top 8 combinedResults.");
-      reorderedIds = combinedResults.slice(0, 8).map(product => product._id.toString());
-    }
-
-    let orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
-    console.log("Ordered Products Count:", orderedProducts.length);
-
-    if (!orderedProducts || orderedProducts.length < 8) {
-      console.warn("Fewer than 8 products found after ordering. Filling from combinedResults.");
-      const existingIds = new Set(orderedProducts.map(prod => prod._id.toString()));
-      const needed = 8 - orderedProducts.length;
-      const additionalProducts = combinedResults
-        .filter(product => !existingIds.has(product._id.toString()))
-        .slice(0, needed);
-      orderedProducts = orderedProducts.concat(additionalProducts);
-    }
-
-    // Final fallback if still no products
-    if (!orderedProducts || orderedProducts.length === 0) {
-      console.warn("No products found even after fallback. Returning no results message.");
-      return res.json({ message: "No results found." });
-    }
-
-    const formattedResults = orderedProducts.slice(0, 8).map((product) => ({
+    const formattedResults = orderedProducts.map((product) => ({
       id: product._id.toString(),
       name: product.name,
       description: product.description,
@@ -661,19 +650,17 @@ app.post("/search", async (req, res) => {
       url: product.url,
     }));
 
-    console.log("Final returned products:", formattedResults.length);
+    // Ensure that the response is sent only once
     res.json(formattedResults);
   } catch (error) {
     console.error("Error handling search request:", error);
+    // If an error occurs, send the response here and ensure you don't send it again later
     if (!res.headersSent) {
       res.status(500).json({ error: "Server error." });
     }
-  } finally {
-    if (client) {
-      await client.close();
-    }
   }
 });
+
 
 
 app.get("/products", async (req, res) => {
