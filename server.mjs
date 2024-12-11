@@ -399,7 +399,9 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
     const productData = filteredResults.map((product) => ({
       id: product._id.toString(),
       name: product.name || "No name",
+      description: product.description || "No description",
       description1: product.description1 || "No description",
+
    
       
     }));
@@ -429,7 +431,7 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDe
       },
       {
         role: "user",
-        content: JSON.stringify(productData, null, 3), // Send only ID and description
+        content: JSON.stringify(productData, null, 4), // Send only ID and description
       },
     ];
 
@@ -562,15 +564,16 @@ app.post("/search", async (req, res) => {
         .status(500)
         .json({ error: "Error generating query embedding" });
 
-    const RRF_CONSTANT = 60;
-    const VECTOR_WEIGHT = 1;
-
-    function calculateRRFScore(fuzzyRank, vectorRank, VECTOR_WEIGHT) {
-      return (
-        1 / (RRF_CONSTANT + fuzzyRank) +
-        VECTOR_WEIGHT * (1 / (RRF_CONSTANT + vectorRank))
-      );
-    }
+        const FUZZY_WEIGHT = 0.1; // Reduce the impact of the fuzzy search rank
+        const VECTOR_WEIGHT = 1; // Keep vector weight as 1 or adjust as needed
+        const RRF_CONSTANT = 60; // Keep the existing RRF constant
+        
+        function calculateRRFScore(fuzzyRank, vectorRank, VECTOR_WEIGHT) {
+          return (
+            FUZZY_WEIGHT * (1 / (RRF_CONSTANT + fuzzyRank)) +
+            VECTOR_WEIGHT * (1 / (RRF_CONSTANT + vectorRank))
+          );
+        }
 
     // Perform fuzzy search
     const cleanedHebrewText = removeWordsFromQuery(query, noHebrewWord);
