@@ -20,39 +20,43 @@ const openai = new OpenAI({apiKey: process.env.OPENAI_API_KEY});
 const mongodbUri = process.env.MONGODB_URI;
 let client;
 
-const buildAutocompletePipeline = (query, indexName, path) => {
+const buildAutocompletePipeline = (query, indexName, path, limit = 10, prefixLength = 2) => {
   // Construct the pipeline
-  const pipeline = [];
-
-  // Use fuzzy autocomplete for all queries
-  pipeline.push({
-    $search: {
-      index: indexName,
-      autocomplete: {
-        query: query, // The input query string
-        path: path,   // Field to search (e.g., "name" or "description")
-        fuzzy: {
-          maxEdits: 2,      // Allow up to 2 edits for flexibility
-          prefixLength: 3,  // Require at least 2 matching characters as prefix
+  const pipeline = [
+    // Match products that are either in stock or do not have the `instock` field
+    {
+      $match: {
+        $or: [
+          { instock: true },             // Products in stock
+          { instock: { $exists: false } } // Products without the `instock` field
+        ],
+      },
+    },
+    {
+      $search: {
+        index: indexName,
+        autocomplete: {
+          query: query, // The input query string
+          path: path,   // Field to search (e.g., "name" or "description")
+          fuzzy: {
+            maxEdits: query.length > 3 ? 2 : 1, // Adjust max edits dynamically
+            prefixLength: prefixLength,        // Minimum prefix length
+          },
         },
       },
     },
-  });
-
-  // Limit results and project necessary fields
-  pipeline.push(
-    { $limit: 10 },
+    { $limit: limit }, // Limit results dynamically
     {
       $project: {
         _id: 0,
-        suggestion: `$${path}`,
-        score: { $meta: "searchScore" },
-        url: 1,
+        suggestion: `$${path}`,        // Project the field used in autocomplete
+        score: { $meta: "searchScore" }, // Include search score
+        url: 1,                        // Include additional fields
         image: 1,
         price: 1,
       },
-    }
-  );
+    },
+  ];
 
   return pipeline;
 };
@@ -72,7 +76,7 @@ app.get("/autocomplete", async (req, res) => {
     const db = client.db(dbName);
 
     // Collections to fetch from
-    const collection1 = db.collection(collectionName1); // Assume this is "products"
+    const collection1 = db.collection(collectionName1).filter({instock: true}); // Assume this is "products"
     const collection2 = db.collection(collectionName2); // Other collection
 
     // Build pipelines for each collection
