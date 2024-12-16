@@ -141,8 +141,8 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
                 query: cleanedHebrewText,
                 path: ["name", "description"],
                 fuzzy: {
-                  maxEdits: 1, // Reduce edits for stricter matching
-                  prefixLength: 3, // Require more prefix match
+                  maxEdits: 3, // Reduce edits for stricter matching
+                  prefixLength: 2, // Require more prefix match
                   maxExpansions: 20, // Lower expansions for narrower results
                 },
               },
@@ -564,7 +564,7 @@ app.post("/search", async (req, res) => {
         .status(500)
         .json({ error: "Error generating query embedding" });
 
-        const FUZZY_WEIGHT = 0.2; // Reduce the impact of the fuzzy search rank
+        const FUZZY_WEIGHT = 0.5; // Reduce the impact of the fuzzy search rank
         const VECTOR_WEIGHT = 1; // Keep vector weight as 1 or adjust as needed
         const RRF_CONSTANT = 60; // Keep the existing RRF constant
         
