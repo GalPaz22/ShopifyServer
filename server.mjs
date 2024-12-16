@@ -76,7 +76,7 @@ app.get("/autocomplete", async (req, res) => {
     const db = client.db(dbName);
 
     // Collections to fetch from
-    const collection1 = db.collection(collectionName1).filter({instock: true}); // Assume this is "products"
+    const collection1 = db.collection(collectionName1); // Assume this is "products"
     const collection2 = db.collection(collectionName2); // Other collection
 
     // Build pipelines for each collection
