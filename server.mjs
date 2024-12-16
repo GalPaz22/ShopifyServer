@@ -20,43 +20,39 @@ const openai = new OpenAI({apiKey: process.env.OPENAI_API_KEY});
 const mongodbUri = process.env.MONGODB_URI;
 let client;
 
-const buildAutocompletePipeline = (query, indexName, path, limit = 10, prefixLength = 2) => {
+const buildAutocompletePipeline = (query, indexName, path) => {
   // Construct the pipeline
-  const pipeline = [
-    // Match products that are either in stock or do not have the `instock` field
-    {
-      $match: {
-        $or: [
-          { instock: true },             // Products in stock
-          { instock: { $exists: false } } // Products without the `instock` field
-        ],
-      },
-    },
-    {
-      $search: {
-        index: indexName,
-        autocomplete: {
-          query: query, // The input query string
-          path: path,   // Field to search (e.g., "name" or "description")
-          fuzzy: {
-            maxEdits: query.length > 3 ? 2 : 1, // Adjust max edits dynamically
-            prefixLength: prefixLength,        // Minimum prefix length
-          },
+  const pipeline = [];
+
+  // Use fuzzy autocomplete for all queries
+  pipeline.push({
+    $search: {
+      index: indexName,
+      autocomplete: {
+        query: query, // The input query string
+        path: path,   // Field to search (e.g., "name" or "description")
+        fuzzy: {
+          maxEdits: 2,      // Allow up to 2 edits for flexibility
+          prefixLength: 2,  // Require at least 2 matching characters as prefix
         },
       },
     },
-    { $limit: limit }, // Limit results dynamically
+  });
+
+  // Limit results and project necessary fields
+  pipeline.push(
+    { $limit: 10 },
     {
       $project: {
         _id: 0,
-        suggestion: `$${path}`,        // Project the field used in autocomplete
-        score: { $meta: "searchScore" }, // Include search score
-        url: 1,                        // Include additional fields
+        suggestion: `$${path}`,
+        score: { $meta: "searchScore" },
+        url: 1,
         image: 1,
         price: 1,
       },
-    },
-  ];
+    }
+  );
 
   return pipeline;
 };
