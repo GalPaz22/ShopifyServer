@@ -162,7 +162,9 @@ const buildFuzzySearchPipeline = (translatedQuery, filters) => {
         : filters.category;
     }
     if (filters.type ?? null) {
-      matchStage.type = { $regex: filters.type, $options: "i" };
+      matchStage.type = Array.isArray(filters.type)
+        ? { $in: filters.type }
+        : filters.type;
     }
     if (filters.minPrice && filters.maxPrice) {
       matchStage.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
@@ -216,7 +218,9 @@ const buildVectorSearchPipeline = (queryEmbedding, filters) => {
         : filters.category;
     }
     if (filters.type ?? null) {
-      matchStage.type = { $regex: filters.type, $options: "i" };
+      matchStage.type = Array.isArray(filters.type)
+        ? { $in: filters.type }
+        : filters.type;
     }
     if (filters.minPrice && filters.maxPrice) {
       matchStage.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
