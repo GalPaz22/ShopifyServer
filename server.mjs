@@ -129,7 +129,7 @@ async function connectToMongoDB(mongodbUri) {
   return client;
 }
 
-const buildFuzzySearchPipeline = (translatedQuery, filters) => {
+const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
   const pipeline = [
     {
       $search: {
@@ -138,8 +138,8 @@ const buildFuzzySearchPipeline = (translatedQuery, filters) => {
           should: [
             {
               text: {
-                query: translatedQuery,
-                path: ["name", "description1"],
+                query: cleanedHebrewText,
+                path: ["name", "description"],
                 fuzzy: {
                   maxEdits: 1, // Reduce edits for stricter matching
                   prefixLength: 3, // Require more prefix match
@@ -564,7 +564,7 @@ app.post("/search", async (req, res) => {
         .status(500)
         .json({ error: "Error generating query embedding" });
 
-        const FUZZY_WEIGHT = 0.1; // Reduce the impact of the fuzzy search rank
+        const FUZZY_WEIGHT = 0.2; // Reduce the impact of the fuzzy search rank
         const VECTOR_WEIGHT = 1; // Keep vector weight as 1 or adjust as needed
         const RRF_CONSTANT = 60; // Keep the existing RRF constant
         
@@ -580,7 +580,7 @@ app.post("/search", async (req, res) => {
     console.log(noHebrewWord);
     console.log("Cleaned query for fuzzy search:", cleanedHebrewText); // Check if cleanedText
     const fuzzySearchPipeline = buildFuzzySearchPipeline(
-      translatedQuery,
+      cleanedHebrewText,
       filters
     );
     const fuzzyResults = await collection
