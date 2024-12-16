@@ -141,7 +141,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
                 query: cleanedHebrewText,
                 path: ["name", "description"],
                 fuzzy: {
-                  maxEdits: 3, // Reduce edits for stricter matching
+                  maxEdits: 1, // Reduce edits for stricter matching
                   prefixLength: 2, // Require more prefix match
                   maxExpansions: 20, // Lower expansions for narrower results
                 },
