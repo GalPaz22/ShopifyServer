@@ -154,8 +154,13 @@ const buildFuzzySearchPipeline = (translatedQuery, filters) => {
   ];
 
   if (filters && Object.keys(filters).length > 0) {
-    const matchStage = {};
-  
+    const matchStage = {
+      $or: [
+        { stockStatus: { $exists: false } },
+        { stockStatus: "instock" }
+      ]
+    };
+
     if (filters.category ?? null) {
       matchStage.category = Array.isArray(filters.category)
         ? { $in: filters.category }
@@ -180,10 +185,7 @@ const buildFuzzySearchPipeline = (translatedQuery, filters) => {
     }
   
     // Check for `stockStatus` field and ensure it's `instock`
-    matchStage.$or = [
-      { stockStatus: { $exists: false } }, // Include documents without `stockStatus`
-      { stockStatus: "instock" } // Include only documents where `stockStatus` is `instock`
-    ];
+  
   
     if (Object.keys(matchStage).length > 0) {
       pipeline.push({ $match: matchStage });
@@ -210,7 +212,12 @@ const buildVectorSearchPipeline = (queryEmbedding, filters) => {
   ];
 
   if (filters && Object.keys(filters).length > 0) {
-    const matchStage = {};
+    const matchStage = {
+      $or: [
+        { stockStatus: { $exists: false } },
+        { stockStatus: "instock" }
+      ]
+    };
   
     if (filters.category ?? null) {
       matchStage.category = Array.isArray(filters.category)
@@ -236,10 +243,7 @@ const buildVectorSearchPipeline = (queryEmbedding, filters) => {
     }
   
     // Check for `stockStatus` field and ensure it's `instock`
-    matchStage.$or = [
-      { stockStatus: { $exists: false } }, // Include documents without `stockStatus`
-      { stockStatus: "instock" } // Include only documents where `stockStatus` is `instock`
-    ];
+ 
   
     if (Object.keys(matchStage).length > 0) {
       pipeline.push({ $match: matchStage });
