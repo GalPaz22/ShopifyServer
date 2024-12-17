@@ -153,13 +153,14 @@ const buildFuzzySearchPipeline = (translatedQuery, filters) => {
     },
   ];
 
+  const matchStage = {
+    $or: [
+      { stockStatus: { $exists: false } },
+      { stockStatus: "instock" }
+    ]
+  };
+
   if (filters && Object.keys(filters).length > 0) {
-    const matchStage = {
-      $or: [
-        { stockStatus: { $exists: false } },
-        { stockStatus: "instock" }
-      ]
-    };
 
     if (filters.category ?? null) {
       matchStage.category = Array.isArray(filters.category)
@@ -211,13 +212,13 @@ const buildVectorSearchPipeline = (queryEmbedding, filters) => {
     },
   ];
 
+  const matchStage = {
+    $or: [
+      { stockStatus: { $exists: false } },
+      { stockStatus: "instock" }
+    ]
+  };
   if (filters && Object.keys(filters).length > 0) {
-    const matchStage = {
-      $or: [
-        { stockStatus: { $exists: false } },
-        { stockStatus: "instock" }
-      ]
-    };
   
     if (filters.category ?? null) {
       matchStage.category = Array.isArray(filters.category)
