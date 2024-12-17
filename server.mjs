@@ -141,9 +141,9 @@ const buildFuzzySearchPipeline = (translatedQuery, filters) => {
                 query: translatedQuery,
                 path: ["name", "description1"],
                 fuzzy: {
-                  maxEdits: 1, // Reduce edits for stricter matching
-                  prefixLength: 2, // Require more prefix match
-                  maxExpansions: 20, // Lower expansions for narrower results
+                  maxEdits: 1,
+                  prefixLength: 2,
+                  maxExpansions: 20,
                 },
               },
             },
@@ -153,21 +153,22 @@ const buildFuzzySearchPipeline = (translatedQuery, filters) => {
     },
   ];
 
+  // Define a base match stage to exclude outofstock items
   const matchStage = {
     $or: [
       { stockStatus: { $exists: false } },
       { stockStatus: "instock" }
-    ]
+    ],
   };
 
+  // Only add additional conditions if filters are present
   if (filters && Object.keys(filters).length > 0) {
-
-    if (filters.category ?? null) {
+    if (filters.category) {
       matchStage.category = Array.isArray(filters.category)
         ? { $in: filters.category }
         : filters.category;
     }
-    if (filters.type ?? null) {
+    if (filters.type) {
       matchStage.type = Array.isArray(filters.type)
         ? { $in: filters.type }
         : filters.type;
@@ -180,23 +181,19 @@ const buildFuzzySearchPipeline = (translatedQuery, filters) => {
       matchStage.price = { $lte: filters.maxPrice };
     }
     if (filters.price) {
-      const price = filters.price;
-      const priceRange = price * 0.15; // 15% of the price
-      matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
-    }
-  
-    // Check for `stockStatus` field and ensure it's `instock`
-  
-  
-    if (Object.keys(matchStage).length > 0) {
-      pipeline.push({ $match: matchStage });
+      const priceRange = filters.price * 0.15;
+      matchStage.price = { $gte: filters.price - priceRange, $lte: filters.price + priceRange };
     }
   }
+
+  // Always push the match stage, regardless of filters
+  pipeline.push({ $match: matchStage });
 
   pipeline.push({ $limit: 20 });
 
   return pipeline;
 };
+
 
 
 const buildVectorSearchPipeline = (queryEmbedding, filters) => {
@@ -245,11 +242,9 @@ const buildVectorSearchPipeline = (queryEmbedding, filters) => {
   
     // Check for `stockStatus` field and ensure it's `instock`
  
-  
-    if (Object.keys(matchStage).length > 0) {
-      pipeline.push({ $match: matchStage });
-    }
   }
+
+  pipeline.push({ $match: matchStage });
 
   return pipeline;
 };
