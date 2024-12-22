@@ -33,9 +33,19 @@ const buildAutocompletePipeline = (query, indexName, path) => {
         path: path,   // Field to search (e.g., "name" or "description")
         fuzzy: {
           maxEdits: 2,      // Allow up to 2 edits for flexibility
-          prefixLength: 2,  // Require at least 2 matching characters as prefix
+           // Require at least 2 matching characters as prefix
         },
       },
+    },
+  });
+
+  // Exclude outofstock items
+  pipeline.push({
+    $match: {
+      $or: [
+        { stockStatus: { $exists: false } },
+        { stockStatus: "instock" }
+      ],
     },
   });
 
