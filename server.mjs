@@ -674,7 +674,7 @@ app.post("/search", async (req, res) => {
 
     // Reorder the results with GPT-4 based on description relevance to the query
     const reorderedIds = await reorderResultsWithGPT(
-      combinedResults,
+      combinedResults.slice(0, 14),
       translatedQuery,
       query
     );
