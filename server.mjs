@@ -33,7 +33,7 @@ const buildAutocompletePipeline = (query, indexName, path) => {
         path: path,   // Field to search (e.g., "name" or "description")
         fuzzy: {
           maxEdits: 2,      // Allow up to 2 edits for flexibility
-           // Require at least 2 matching characters as prefix
+          prefixLength: 2,  // Require at least 2 matching characters as prefix
         },
       },
     },
@@ -139,93 +139,28 @@ async function connectToMongoDB(mongodbUri) {
   return client;
 }
 
-const buildFuzzySearchPipeline = (translatedQuery, filters) => {
+const buildFuzzySearchPipeline = (query, filters) => {
   const pipeline = [
     {
       $search: {
         index: "default",
-        compound: {
-          should: [
-            {
               text: {
-                query: translatedQuery,
-                path: ["name", "description1"],
+                query: query,
+                path: "name",
                 fuzzy: {
-                  maxEdits: 1,
-                  prefixLength: 2,
-                  maxExpansions: 20,
+                  maxEdits: 2, // Reduce edits for stricter matching
+                  prefixLength: 1, // Require more prefix match
+                  maxExpansions: 50, // Lower expansions for narrower results
+                  
                 },
-              },
-            },
-          ],
+              
         },
       },
     },
   ];
 
-  // Define a base match stage to exclude outofstock items
-  const matchStage = {
-    $or: [
-      { stockStatus: { $exists: false } },
-      { stockStatus: "instock" }
-    ],
-  };
-
-  // Only add additional conditions if filters are present
   if (filters && Object.keys(filters).length > 0) {
-    if (filters.category) {
-      matchStage.category = Array.isArray(filters.category)
-        ? { $in: filters.category }
-        : filters.category;
-    }
-    if (filters.type) {
-      matchStage.type = Array.isArray(filters.type)
-        ? { $in: filters.type }
-        : filters.type;
-    }
-    if (filters.minPrice && filters.maxPrice) {
-      matchStage.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
-    } else if (filters.minPrice) {
-      matchStage.price = { $gte: filters.minPrice };
-    } else if (filters.maxPrice) {
-      matchStage.price = { $lte: filters.maxPrice };
-    }
-    if (filters.price) {
-      const priceRange = filters.price * 0.15;
-      matchStage.price = { $gte: filters.price - priceRange, $lte: filters.price + priceRange };
-    }
-  }
-
-  // Always push the match stage, regardless of filters
-  pipeline.push({ $match: matchStage });
-
-  pipeline.push({ $limit: 20 });
-
-  return pipeline;
-};
-
-
-
-const buildVectorSearchPipeline = (queryEmbedding, filters) => {
-  const pipeline = [
-    {
-      $vectorSearch: {
-        index: "vector_index",
-        path: "embedding",
-        queryVector: queryEmbedding,
-        numCandidates: 300,
-        limit: 50, // Increase limit for better RRF results
-      },
-    },
-  ];
-
-  const matchStage = {
-    $or: [
-      { stockStatus: { $exists: false } },
-      { stockStatus: "instock" }
-    ]
-  };
-  if (filters && Object.keys(filters).length > 0) {
+    const matchStage = {};
   
     if (filters.category ?? null) {
       matchStage.category = Array.isArray(filters.category)
@@ -233,9 +168,7 @@ const buildVectorSearchPipeline = (queryEmbedding, filters) => {
         : filters.category;
     }
     if (filters.type ?? null) {
-      matchStage.type = Array.isArray(filters.type)
-        ? { $in: filters.type }
-        : filters.type;
+      matchStage.type = { $regex: filters.type, $options: "i" };
     }
     if (filters.minPrice && filters.maxPrice) {
       matchStage.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
@@ -251,13 +184,95 @@ const buildVectorSearchPipeline = (queryEmbedding, filters) => {
     }
   
     // Check for `stockStatus` field and ensure it's `instock`
- 
+    matchStage.$or = [
+      { stockStatus: { $exists: false } }, // Include documents without `stockStatus`
+      { stockStatus: "instock" } // Include only documents where `stockStatus` is `instock`
+    ];
+  
+    if (Object.keys(matchStage).length > 0) {
+      pipeline.push({ $match: matchStage });
+    }
   }
 
-  pipeline.push({ $match: matchStage });
+  pipeline.push({ $limit: 20 });
 
   return pipeline;
 };
+
+
+
+function buildVectorSearchPipeline(queryEmbedding, filters = {}) {
+  // Initialize filter as an empty object
+  const filter = {};
+
+  // Category filter
+  if (filters.category) {
+    filter.category = Array.isArray(filters.category)
+      ? { $in: filters.category }
+      : filters.category;
+  }
+
+  // Type filter
+  if (filters.type) {
+    // Since $regex is not supported in $vectorSearch.filter, handle this in a subsequent $match stage
+    filter.type = filters.type;
+  }
+
+  // Price filters
+  if (filters.minPrice && filters.maxPrice) {
+    filter.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
+  } else if (filters.minPrice) {
+    filter.price = { $gte: filters.minPrice };
+  } else if (filters.maxPrice) {
+    filter.price = { $lte: filters.maxPrice };
+  }
+
+  // "Around" a specific price with 15% tolerance
+  if (filters.price) {
+    const price = filters.price;
+    const priceRange = price * 0.15;
+    filter.price = { $gte: price - priceRange, $lte: price + priceRange };
+  }
+
+  // Stock status
+  // We want: either no stockStatus field OR stockStatus = "instock"
+
+  
+
+  // Construct the pipeline
+  const pipeline = [
+    {
+      $vectorSearch: {
+        index: "vector_index",
+        path: "embedding",
+        queryVector: queryEmbedding,
+        exact: true,
+        limit: 20,
+        // Apply filter only if it's not empty
+        ...(Object.keys(filter).length && { filter }),
+      },
+    },
+  ];
+  
+  // Add a $match stage for filters not supported in $vectorSearch.filter
+  const postMatchClauses = [];
+  postMatchClauses.push({
+    $or: [
+      { stockStatus: "instock" },
+      { stockStatus: { $exists: false } },
+    ],
+  });
+
+  // Handle type filter with $regex in a subsequent $match stage
+ 
+
+  if (postMatchClauses.length > 0) {
+    pipeline.push({ $match: { $and: postMatchClauses } });
+  }
+
+  return pipeline;
+}
+
 
 // Utility function to translate query from Hebrew to English
 async function isHebrew(query) {
@@ -396,95 +411,100 @@ async function logQuery(queryCollection, query, filters) {
 }
 
 
-async function reorderResultsWithGPT(combinedResults, translatedQuery, alreadyDelivered = []) {
-  try {
-    // Ensure `alreadyDelivered` is an array
-    if (!Array.isArray(alreadyDelivered)) {
-      alreadyDelivered = [];
-    }
 
     // Filter out products that have already been delivered
-    const filteredResults = combinedResults.filter(
-      (product) => !alreadyDelivered.includes(product._id.toString())
-    );
-    console.log(`Number of products remaining: ${filteredResults}`);
-
-    // Prepare an array of objects containing only product IDs and descriptions for remaining items
-    const productData = filteredResults.map((product) => ({
-      id: product._id.toString(),
-      name: product.name || "No name",
-      description: product.description || "No description",
-      description1: product.description1 || "No description",
-
-   
+    async function reorderResultsWithGPT(combinedResults, translatedQuery, query, alreadyDelivered = []) {
+      try {
+        // Ensure `alreadyDelivered` is an array
+        if (!Array.isArray(alreadyDelivered)) {
+          alreadyDelivered = [];
+        }
+    
+        // Filter out products that have already been delivered
+        const filteredResults = combinedResults.filter(
+          (product) => !alreadyDelivered.includes(product._id.toString())
+        );
+    
+        // Prepare an array of objects containing only product IDs and descriptions for remaining items
+        const productData = filteredResults.map((product) => ({
+          id: product._id.toString(),
+          name: product.name || "No name",
+          description: product.description || "No description",
+          description1: product.description1 || "No description",
+    
+    
+    
+          
+    
       
-    }));
-
-    const messages = [
-      {
-        role: "user",
-        content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **8 most relevant product IDs** based solely on how well the product names and descriptions match the query.
-
-### Key Instructions:
-
-1. **Pricing Details**: Ignore any pricing information in the query (e.g., "under $20" or "בין 200-400 ש''ח"). Pricing has already been filtered and should not influence your ranking- so always return 8 most relevant product IDs!
-   
-2. **Output Format**: Your response must be a **plain array** of exactly 8 product IDs, ordered by their relevance to the query. Do not include any other text or formatting. Example format:
-   ["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]
-
-3. **Relevance Criteria**: Focus exclusively on the product **names**, **descriptions1** and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
-
-4. **Strict Output Rules**:
-   - Do not write "json" or any other descriptive text.
-   - Do not include phrases like "the best matches are:" or explanations.
-   - Only respond with the array of product IDs in the specified format.
-
-### Example Response:
-["id1", "id2", "id3", "id4", "id5", "id6", "id7", "id8"]
-`,
-      },
-      {
-        role: "user",
-        content: JSON.stringify(productData, null, 4), // Send only ID and description
-      },
-    ];
-
-    // Send the request to GPT-4
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
-      messages: messages,
-      temperature: 0.1,
-    });
-
-    // Extract and parse the reordered product IDs
-    const reorderedText = response.choices[0]?.message?.content;
-    console.log("Reordered IDs text:", reorderedText);
-
-    if (!reorderedText) {
-      throw new Error("No content returned from GPT-4");
-    }
-
-    const cleanedText = reorderedText.trim().replace(/[^,\[\]"'\w]/g, "").replace(/json/gi, "");
-
-    try {
-      // Parse the cleaned response which should be an array of product IDs
-      const reorderedIds = JSON.parse(cleanedText);
-      if (!Array.isArray(reorderedIds)) {
-        throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
-      } else if (reorderedIds.length < 3) {
-        return combinedResults.map((product) => product._id.toString()).slice(0, 8);
+        }));
+       console.log(JSON.stringify(productData.slice(0,4)))
+        const messages = [
+          {
+            role: "user",
+            content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}, ${query}"  from an e-commerce site, along with a provided list of products (each including a name and description), and return the ** all of the most relevant product IDs** based solely on how well the product names and descriptions match the query.
+    
+    ### Key Instructions:
+    
+    1. **Pricing Details**: Ignore any pricing information in the query (e.g., "under $20" or "בין 200-400 ש''ח"). Pricing has already been filtered and should not influence your ranking.
+       
+    2. **Output Format**: Your response must be a **plain array** of the most relevant product IDs, ordered by their relevance to the query. Do not include any other text or formatting.
+    
+    
+    3. **Relevance Criteria**: Focus exclusively on the product **names**, **descriptions1** and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
+    
+    4. **Strict Output Rules**:
+       - Do not write "json" or any other descriptive text.
+       - Do not include phrases like "the best matches are:" or explanations.
+       - Only respond with the array of product IDs in the specified format.
+       - ** always answer with as much porducts you can find relvant (at least 4)  **.
+       - ** dont answer with more than 8 products **.
+    
+    
+    
+    
+    `,
+          },
+          {
+            role: "user",
+            content: JSON.stringify(productData, null,4), // Send only ID and description
+          },
+        ];
+    
+        // Send the request to GPT-4
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o", // Use GPT-4, or "gpt-3.5-turbo" for faster response
+          messages: messages,
+        temperature: 0.1,
+        });
+    
+        // Extract and parse the reordered product IDs
+        const reorderedText = response.choices[0]?.message?.content;
+        console.log("Reordered IDs text:", reorderedText);
+    
+        if (!reorderedText) {
+          throw new Error("No content returned from GPT-4");
+        }
+        console.log(productData.description)
+    
+        const cleanedText = reorderedText.trim().replace(/[^,\[\]"'\w]/g, "").replace(/json/gi, "");
+    
+        try {
+          // Parse the cleaned response which should be an array of product IDs
+          const reorderedIds = JSON.parse(cleanedText);
+          if (!Array.isArray(reorderedIds)) {
+            throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
+          }
+          return reorderedIds;
+        } catch (parseError) {
+          console.error("Failed to parse GPT-4 response:", parseError, "Cleaned Text:", cleanedText);
+          throw new Error("Response from GPT-4 could not be parsed as a valid array.");
+        }
+      } catch (error) {
+        console.error("Error reordering results with GPT:", error);
+        throw error;
       }
-      return reorderedIds;
-    } catch (parseError) {
-      console.error("Failed to parse GPT-4 response:", parseError, "Cleaned Text:", cleanedText);
-      throw new Error("Response from GPT-4 could not be parsed as a valid array.");
     }
-  } catch (error) {
-    console.error("Error reordering results with GPT:", error);
-    throw error;
-  }
-}
-
 
 
 
@@ -540,10 +560,10 @@ app.post("/search", async (req, res) => {
     example,
     noWord,
     noHebrewWord,
-    context
+    context,
   } = req.body;
 
-  if (!query || !dbName || !collectionName ) {
+  if (!query || !dbName || !collectionName) {
     return res.status(400).json({
       error:
         "Query, MongoDB URI, database name, collection name, and system prompt are required",
@@ -566,6 +586,7 @@ app.post("/search", async (req, res) => {
     const cleanedText = removeWineFromQuery(translatedQuery, noWord);
     console.log(noWord);
     console.log("Cleaned query for embedding:", cleanedText);
+
     // Extract filters from the translated query
     const filters = await extractFiltersFromQuery(query, categories, types, example);
 
@@ -578,30 +599,31 @@ app.post("/search", async (req, res) => {
         .status(500)
         .json({ error: "Error generating query embedding" });
 
-        const FUZZY_WEIGHT = 0.5; // Reduce the impact of the fuzzy search rank
-        const VECTOR_WEIGHT = 1; // Keep vector weight as 1 or adjust as needed
-        const RRF_CONSTANT = 60; // Keep the existing RRF constant
-        
-        function calculateRRFScore(fuzzyRank, vectorRank, VECTOR_WEIGHT) {
-          return (
-            FUZZY_WEIGHT * (1 / (RRF_CONSTANT + fuzzyRank)) +
-            VECTOR_WEIGHT * (1 / (RRF_CONSTANT + vectorRank))
-          );
-        }
+    const FUZZY_WEIGHT = 1;
+    const VECTOR_WEIGHT = 1;
+    const RRF_CONSTANT = 60;
 
-    // Perform fuzzy search
+    function calculateRRFScore(fuzzyRank, vectorRank, VECTOR_WEIGHT) {
+      return (
+        FUZZY_WEIGHT * (1 / (RRF_CONSTANT + fuzzyRank)) +
+        VECTOR_WEIGHT * (1 / (RRF_CONSTANT + vectorRank))
+      );
+    }
+
+    // Perform fuzzy search using Atlas Search
     const cleanedHebrewText = removeWordsFromQuery(query, noHebrewWord);
     console.log(noHebrewWord);
-    console.log("Cleaned query for fuzzy search:", cleanedHebrewText); // Check if cleanedText
+    console.log("Cleaned query for fuzzy search:", cleanedHebrewText);
+
     const fuzzySearchPipeline = buildFuzzySearchPipeline(
-      translatedQuery,
+      translatedQuery, // Use the translated query for better relevance
       filters
     );
     const fuzzyResults = await collection
       .aggregate(fuzzySearchPipeline)
       .toArray();
 
-    // Perform vector search
+    // Perform vector search (assuming vector search is correctly implemented)
     const vectorSearchPipeline = buildVectorSearchPipeline(
       queryEmbedding,
       filters
@@ -648,32 +670,57 @@ app.post("/search", async (req, res) => {
           ),
         };
       })
-      .sort((a, b) => b.rrf_score - a.rrf_score)
-      .slice(0, 15); // Get the top 12 results
+      .sort((a, b) => b.rrf_score - a.rrf_score);
 
     // Reorder the results with GPT-4 based on description relevance to the query
-    const reorderedIds = await reorderResultsWithGPT(combinedResults, translatedQuery);
-    const orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
-    
-    // Format results
-  
+    const reorderedIds = await reorderResultsWithGPT(
+      combinedResults,
+      translatedQuery,
+      query
+    );
+    const orderedProducts = await getProductsByIds(
+      reorderedIds,
+      dbName,
+      collectionName
+    );
 
-    const formattedResults = orderedProducts.map((product) => ({
-      id: product._id.toString(),
-      name: product.name,
-      description: product.description,
-      price: product.price,
-      image: product.image,
-      url: product.url,
-    }));
+    // Separate GPT-ordered results from the combined results
+    const reorderedProductIds = new Set(reorderedIds);
+    const remainingResults = combinedResults.filter(
+      (result) => !reorderedProductIds.has(result._id.toString())
+    );
 
-    // Ensure that the response is sent only once
+    // Format the final results: GPT-ordered results followed by the remaining combined results
+    const formattedResults = [
+      ...orderedProducts.map((product) => ({
+        id: product._id.toString(),
+        name: product.name,
+        description: product.description1,
+        price: product.price,
+        image: product.image,
+        url: product.url,
+        highlight: true,
+      })),
+      ...remainingResults.map((result) => ({
+        id: result._id.toString(),
+        name: result.name,
+        description: result.description1,
+        price: result.price,
+        image: result.image,
+        url: result.url,
+      })),
+    ];
+
+    // Send the final response
     res.json(formattedResults);
   } catch (error) {
     console.error("Error handling search request:", error);
-    // If an error occurs, send the response here and ensure you don't send it again later
     if (!res.headersSent) {
       res.status(500).json({ error: "Server error." });
+    }
+  } finally {
+    if (client) {
+      await client.close();
     }
   }
 });
