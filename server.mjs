@@ -139,13 +139,13 @@ async function connectToMongoDB(mongodbUri) {
   return client;
 }
 
-const buildFuzzySearchPipeline = (query, filters) => {
+const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
   const pipeline = [
     {
       $search: {
         index: "default",
               text: {
-                query: query,
+                query: cleanedHebrewText ,
                 path: "name",
                 fuzzy: {
                   maxEdits: 2, // Reduce edits for stricter matching
@@ -332,7 +332,7 @@ function removeWordsFromQuery(query, noHebrewWord) {
   const queryWords = query.split(" ");
   const filteredWords = queryWords.filter((word) => {
     // Remove the word if it's in the noWords list or if it's a number
-    return !noHebrewWord.includes(word.toLowerCase());
+    return !noHebrewWord.includes(word.toLowerCase() && isNaN(word) );
   });
 
   return filteredWords.join(" ");
@@ -616,7 +616,7 @@ app.post("/search", async (req, res) => {
     console.log("Cleaned query for fuzzy search:", cleanedHebrewText);
 
     const fuzzySearchPipeline = buildFuzzySearchPipeline(
-      translatedQuery, // Use the translated query for better relevance
+      cleanedHebrewText, // Use the translated query for better relevance
       filters
     );
     const fuzzyResults = await collection
