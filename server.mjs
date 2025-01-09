@@ -247,7 +247,7 @@ function buildVectorSearchPipeline(queryEmbedding, filters = {}) {
         path: "embedding",
         queryVector: queryEmbedding,
         exact: true,
-        limit: 20,
+        limit: 16,
         // Apply filter only if it's not empty
         ...(Object.keys(filter).length && { filter }),
       },
@@ -674,7 +674,7 @@ app.post("/search", async (req, res) => {
 
     // Reorder the results with GPT-4 based on description relevance to the query
     const reorderedIds = await reorderResultsWithGPT(
-      combinedResults.slice(0, 14),
+      combinedResults.slice(0, 12),
       translatedQuery,
       query
     );
@@ -695,7 +695,7 @@ app.post("/search", async (req, res) => {
       ...orderedProducts.map((product) => ({
         id: product._id.toString(),
         name: product.name,
-        description: product.description1,
+        description: product.description,
         price: product.price,
         image: product.image,
         url: product.url,
@@ -704,7 +704,7 @@ app.post("/search", async (req, res) => {
       ...remainingResults.map((result) => ({
         id: result._id.toString(),
         name: result.name,
-        description: result.description1,
+        description: result.description,
         price: result.price,
         image: result.image,
         url: result.url,
