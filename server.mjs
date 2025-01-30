@@ -156,6 +156,20 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
               
         },
       },
+      $search: {
+        index: "default",
+              text: {
+                query: cleanedHebrewText ,
+                path: "description",
+                fuzzy: {
+                  maxEdits: 2, // Reduce edits for stricter matching
+                  prefixLength: 1, // Require more prefix match
+                  maxExpansions: 50, // Lower expansions for narrower results
+                  
+                },
+              
+        },
+      },
     },
   ];
 
@@ -429,8 +443,7 @@ async function logQuery(queryCollection, query, filters) {
         const productData = filteredResults.map((product) => ({
           id: product._id.toString(),
           name: product.name || "No name",
-          description: product.description || "No description",
-          description1: product.description1 || "No description",
+          description: product.description1 || "No description",
     
     
     
@@ -442,7 +455,7 @@ async function logQuery(queryCollection, query, filters) {
         const messages = [
           {
             role: "user",
-            content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}, ${query}"  from an e-commerce site, along with a provided list of products (each including a name and description), and return the ** all of the most relevant product IDs** based solely on how well the product names and descriptions match the query.
+            content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery} from an e-commerce site, along with a provided list of products (each including a name and description), and return the ** all of the most relevant product IDs** based solely on how well the product names and descriptions match the query.
     
     ### Key Instructions:
     
@@ -451,7 +464,7 @@ async function logQuery(queryCollection, query, filters) {
     2. **Output Format**: Your response must be a **plain array** of the most relevant product IDs, ordered by their relevance to the query. Do not include any other text or formatting.
     
     
-    3. **Relevance Criteria**: Focus exclusively on the product **names**, **descriptions1** and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
+    3. **Relevance Criteria**: Focus exclusively on the product **names** and **descriptions** to determine relevance to the query. Rank based on semantic and contextual alignment, ensuring the results are the most relevant to the query intent.
     
     4. **Strict Output Rules**:
        - Do not write "json" or any other descriptive text.
@@ -674,7 +687,7 @@ app.post("/search", async (req, res) => {
 
     // Reorder the results with GPT-4 based on description relevance to the query
     const reorderedIds = await reorderResultsWithGPT(
-      combinedResults.slice(0, 12),
+      combinedResults.slice(0, 20),
       translatedQuery,
       query
     );
