@@ -144,30 +144,31 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
     {
       $search: {
         index: "default",
+        compound: {
+          should: [
+            {
               text: {
-                query: cleanedHebrewText ,
+                query: cleanedHebrewText,
                 path: "name",
                 fuzzy: {
-                  maxEdits: 2, // Reduce edits for stricter matching
-                  prefixLength: 1, // Require more prefix match
-                  maxExpansions: 50, // Lower expansions for narrower results
-                  
+                  maxEdits: 2,
+                  prefixLength: 1,
+                  maxExpansions: 50,
                 },
-              
-        },
-      },
-      $search: {
-        index: "default",
+              },
+            },
+            {
               text: {
-                query: cleanedHebrewText ,
+                query: cleanedHebrewText,
                 path: "description",
                 fuzzy: {
-                  maxEdits: 2, // Reduce edits for stricter matching
-                  prefixLength: 1, // Require more prefix match
-                  maxExpansions: 50, // Lower expansions for narrower results
-                  
+                  maxEdits: 2,
+                  prefixLength: 1,
+                  maxExpansions: 50,
                 },
-              
+              },
+            },
+          ],
         },
       },
     },
@@ -175,39 +176,50 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
 
   if (filters && Object.keys(filters).length > 0) {
     const matchStage = {};
-  
-    if (filters.category ?? null) {
+
+    // Filter by category
+    if (filters.category != null) {
+      // If filters.category is an array, use $in to match any provided category;
+      // otherwise, match the specific category.
       matchStage.category = Array.isArray(filters.category)
         ? { $in: filters.category }
         : filters.category;
     }
-    if (filters.type ?? null) {
+
+    // Filter by type (using a regex for case-insensitive matching)
+    if (filters.type != null) {
       matchStage.type = { $regex: filters.type, $options: "i" };
     }
-    if (filters.minPrice && filters.maxPrice) {
+
+    // Filter by price range if both minPrice and maxPrice are provided.
+    if (filters.minPrice != null && filters.maxPrice != null) {
       matchStage.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
-    } else if (filters.minPrice) {
+    } else if (filters.minPrice != null) {
       matchStage.price = { $gte: filters.minPrice };
-    } else if (filters.maxPrice) {
+    } else if (filters.maxPrice != null) {
       matchStage.price = { $lte: filters.maxPrice };
     }
-    if (filters.price) {
+
+    // Alternatively, if a specific price is provided and you want a 15% range around it:
+    if (filters.price != null) {
       const price = filters.price;
       const priceRange = price * 0.15; // 15% of the price
       matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
     }
-  
-    // Check for `stockStatus` field and ensure it's `instock`
+
+    // Ensure stockStatus is either not defined or is 'instock'
     matchStage.$or = [
-      { stockStatus: { $exists: false } }, // Include documents without `stockStatus`
-      { stockStatus: "instock" } // Include only documents where `stockStatus` is `instock`
+      { stockStatus: { $exists: false } },
+      { stockStatus: "instock" },
     ];
-  
+
+    // Only add the $match stage if there is at least one filter condition.
     if (Object.keys(matchStage).length > 0) {
       pipeline.push({ $match: matchStage });
     }
   }
 
+  // Limit the number of returned documents.
   pipeline.push({ $limit: 20 });
 
   return pipeline;
