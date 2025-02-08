@@ -491,7 +491,7 @@ async function reorderImagesWithGPT(
 2. Output must be a JSON array of IDs, with no extra text or formatting.
 3. Rank strictly according to the product images.
 4. Return at least 5 but no more than 8 product IDs.
-5. Perform any necessary reasoning internally and briefly as much as possible - do not output your chain-of-thought. Provide the final answer quickly.
+5. Answer ONLY with the Array, do not add any other text beside it- NEVER!
 
 example: [ "id1", "id2", "id3", "id4" ]
 
