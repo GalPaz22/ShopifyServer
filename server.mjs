@@ -16,8 +16,8 @@ app.use(cors({ origin: "*" }));
 
 
 // Initialize OpenAI client
-const GoogleApiKey= process.env.GOOGLE_API_KEY
-const genAI = new GoogleGenerativeAI({GoogleApiKey});
+
+const genAI = new GoogleGenerativeAI( process.env.GOOGLE_API_KEY );
 const model = genAI.getGenerativeModel({ model: "	models/gemini-2.0-flash-exp" });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const mongodbUri = process.env.MONGODB_URI;
