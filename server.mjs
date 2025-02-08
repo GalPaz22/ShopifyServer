@@ -722,11 +722,7 @@ app.post("/search", async (req, res) => {
       if (!res.headersSent) {
         res.status(500).json({ error: "Server error." });
       }
-    } finally {
-      if (client) {
-        await client.close();
-      }
-    }
+    } 
   });
 
 app.get("/products", async (req, res) => {
