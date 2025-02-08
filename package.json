@@ -11,6 +11,7 @@
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@google/generative-ai": "^0.21.0",
     "@shopify/shopify-api": "^11.2.0",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",

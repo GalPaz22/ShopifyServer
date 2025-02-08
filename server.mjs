@@ -5,6 +5,8 @@ import { OpenAI } from "openai";
 import cors from "cors";
 import dotenv from "dotenv";
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
 
 dotenv.config();
 
@@ -12,8 +14,10 @@ const app = express();
 app.use(bodyParser.json());
 app.use(cors({ origin: "*" }));
 
-const anthropicClient = new Anthropic();
+
 // Initialize OpenAI client
+const genAI = new GoogleGenerativeAI({ apiKey: process.env.GOOGLE_API_KEY });
+const model = genAI.getGenerativeModel({ model: "	models/gemini-2.0-flash-exp" });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const mongodbUri = process.env.MONGODB_URI;
 
@@ -197,7 +201,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters) => {
     }
   }
 
-  pipeline.push({ $limit: 20 });
+  pipeline.push({ $limit: 10 });
 
   return pipeline;
 };
@@ -445,6 +449,119 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, query, al
   }
 }
 
+
+
+async function reorderImagesWithGPT(
+ combinedResults,
+ translatedQuery,
+ query,
+ alreadyDelivered = []
+) {
+ try {
+   if (!Array.isArray(alreadyDelivered)) {
+     alreadyDelivered = [];
+   }
+
+   const filteredResults = combinedResults.filter(
+     (product) => !alreadyDelivered.includes(product._id.toString())
+   );
+
+   const productData = combinedResults.map(product => ({
+     id: product._id.toString(),
+     name: product.name,
+     image: product.image,
+     description: product.description1,
+   }));
+
+   const imagesToSend = combinedResults.map(product => ({
+     imageUrl: product.image || "No image"
+   }));
+
+
+   const messages = [
+     {
+       role: "user",
+       parts: [
+         {
+           text: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}", from an e-commerce site, along with a provided list of products (each including only an image), and return the **most relevant product IDs** based on how well the product images match the query.
+
+### Key Instructions:
+1. Ignore pricing details (already filtered).
+2. Output must be a JSON array of IDs, with no extra text or formatting.
+3. Rank strictly according to the product images.
+4. Return at least 5 but no more than 8 product IDs.
+5. Perform any necessary reasoning internally and briefly as much as possible - do not output your chain-of-thought. Provide the final answer quickly.
+
+example: [ "id1", "id2", "id3", "id4" ]
+
+`,
+         },
+         {
+             text:  JSON.stringify(productData, null, 2),
+           },
+         {
+           text: JSON.stringify(
+             {
+               type: "image_url",
+               images: imagesToSend,
+             },
+             null,
+             4
+           ),
+         },
+         ]
+     },
+   ];
+
+ 
+
+
+
+   const geminiResponse = await model.generateContent({
+     contents: messages,
+   });
+
+
+     const responseText = geminiResponse.response.text()
+     console.log("Gemini Reordered IDs text:", responseText);
+ 
+
+
+   if (!responseText) {
+     throw new Error("No content returned from Gemini");
+   }
+
+  // If you want usage details:
+   // console.log(geminiResponse.usage);
+
+
+   const cleanedText = responseText
+   .trim()
+   .replace(/[^,\[\]"'\w]/g, "")
+   .replace(/json/gi, "");
+
+
+   try {
+     const reorderedIds = JSON.parse(cleanedText);
+     if (!Array.isArray(reorderedIds)) {
+       throw new Error("Invalid response format from Gemini. Expected an array of IDs.");
+     }
+     return reorderedIds;
+   } catch (parseError) {
+     console.error(
+       "Failed to parse Gemini response:",
+       parseError,
+       "Cleaned Text:",
+       cleanedText
+     );
+     throw new Error("Response from Gemini could not be parsed as a valid array.");
+   }
+ } catch (error) {
+   console.error("Error reordering results with Gemini:", error);
+   throw error;
+ }
+}
+
 async function getProductsByIds(ids, dbName, collectionName) {
   try {
     const client = await connectToMongoDB(mongodbUri);
@@ -485,6 +602,7 @@ app.post("/search", async (req, res) => {
     noWord,
     noHebrewWord,
     context,
+    useImages,
   } = req.body;
 
   if (!query || !dbName || !collectionName) {
@@ -566,46 +684,50 @@ app.post("/search", async (req, res) => {
       })
       .sort((a, b) => b.rrf_score - a.rrf_score);
 
-    const reorderedIds = await reorderResultsWithGPT(
-      combinedResults.slice(0, 20),
-      translatedQuery,
-      query
-    );
-    const orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
-
-    const reorderedProductIds = new Set(reorderedIds);
-    const remainingResults = combinedResults.filter(
-      (result) => !reorderedProductIds.has(result._id.toString())
-    );
-
-    const formattedResults = [
-      ...orderedProducts.map((product) => ({
-        id: product._id.toString(),
-        name: product.name,
-        description: product.description,
-        price: product.price,
-        image: product.image,
-        url: product.url,
-        highlight: true,
-      })),
-      ...remainingResults.map((result) => ({
-        id: result._id.toString(),
-        name: result.name,
-        description: result.description,
-        price: result.price,
-        image: result.image,
-        url: result.url,
-      })),
-    ];
-
-    res.json(formattedResults);
-  } catch (error) {
-    console.error("Error handling search request:", error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: "Server error." });
+      const reorderFn = useImages ? reorderImagesWithGPT : reorderResultsWithGPT;
+      const reorderedIds = await reorderFn(combinedResults, translatedQuery, query);
+  
+      // 8) Retrieve final product docs in the GPT order
+      const orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
+  
+      // 9) Combine GPT-ordered results + leftover
+      const reorderedProductIds = new Set(reorderedIds);
+      const remainingResults = combinedResults.filter(
+        (r) => !reorderedProductIds.has(r._id.toString())
+      );
+  
+      const formattedResults = [
+        ...orderedProducts.map((product) => ({
+          id: product._id.toString(),
+          name: product.name,
+          description: product.description1,
+          price: product.price,
+          image: product.image,
+          url: product.url,
+          highlight: true,
+        })),
+        ...remainingResults.map((r) => ({
+          id: r._id.toString(),
+          name: r.name,
+          description: r.description1,
+          price: r.price,
+          image: r.image,
+          url: r.url,
+        })),
+      ];
+  
+      res.json(formattedResults);
+    } catch (error) {
+      console.error("Error handling search request:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Server error." });
+      }
+    } finally {
+      if (client) {
+        await client.close();
+      }
     }
-  }
-});
+  });
 
 app.get("/products", async (req, res) => {
   const { dbName, collectionName, limit = 10 } = req.query;
