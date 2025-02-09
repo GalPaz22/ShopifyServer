@@ -719,7 +719,7 @@ app.post("/search", async (req, res) => {
         ...remainingResults.map((r) => ({
           id: r._id.toString(),
           name: r.name,
-          description: r.description1,
+          description: r.description,
           price: r.price,
           image: r.image,
           url: r.url,
