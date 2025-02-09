@@ -379,12 +379,16 @@ async function logQuery(queryCollection, query, filters) {
   await queryCollection.insertOne(queryDocument);
 }
 
-async function reorderResultsWithGPT(combinedResults, translatedQuery, query, alreadyDelivered = []) {
+async function reorderResultsWithGPT(
+  combinedResults,
+  translatedQuery,
+  query,
+  alreadyDelivered = []
+) {
   try {
     if (!Array.isArray(alreadyDelivered)) {
       alreadyDelivered = [];
     }
-
     const filteredResults = combinedResults.filter(
       (product) => !alreadyDelivered.includes(product._id.toString())
     );
@@ -400,52 +404,57 @@ async function reorderResultsWithGPT(combinedResults, translatedQuery, query, al
     const messages = [
       {
         role: "user",
-        content: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **all of the most relevant product IDs** based solely on how well the product names and descriptions match the query.
+        parts: [{ text: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **most relevant product IDs** based solely on how well the product names and descriptions match the query.
 
 ### Key Instructions:
-1. **Pricing Details**: Ignore any pricing information in the query.
-2. **Output Format**: Your response must be a **plain array** of the most relevant product IDs, ordered by their relevance to the query. Do not include any other text or formatting.
-3. **Relevance Criteria**: Focus exclusively on the product **names** and **descriptions** to determine relevance to the query.
-4. **Strict Output Rules**:
-   - Do not write "json" or any other descriptive text.
-   - Do not include phrases like "the best matches are:" or explanations.
-   - Only respond with the array of product IDs.
-   - **Always answer with at least 4 products, and do not answer with more than 8 products.**
-`
+
+1. Ignore pricing details (already filtered).
+2. Output must be a plain array of IDs, no extra text.
+3. Rank strictly by product names and descriptions.
+4. Return at least 4 but no more than 8 product IDs.
+5. Perform any necessary reasoning internally and briefly—do not output your chain-of-thought. Provide the final answer quickly.
+` }],
       },
       {
         role: "user",
-        content: JSON.stringify(productData, null, 4),
+        parts: [{ text: JSON.stringify(productData, null, 4) }],
       },
     ];
+    
+     const geminiResponse = await model.generateContent({
+          contents: messages,
+        });
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: messages,
-      temperature: 0.1,
-    });
 
-    const reorderedText = response.choices[0]?.message?.content;
+    const response = await geminiResponse.response;
+   const  reorderedText = response.text();
     console.log("Reordered IDs text:", reorderedText);
 
     if (!reorderedText) {
-      throw new Error("No content returned from GPT-4");
+      throw new Error("No content returned from Gemini");
     }
 
-    const cleanedText = reorderedText.trim().replace(/[^,\[\]"'\w]/g, "").replace(/json/gi, "");
-
+      const cleanedText = reorderedText
+      .trim()
+      .replace(/[^,\[\]"'\w]/g, "")
+      .replace(/json/gi, "");
     try {
-      const reorderedIds = JSON.parse(cleanedText);
-      if (!Array.isArray(reorderedIds)) {
-        throw new Error("Invalid response format from GPT-4. Expected an array of IDs.");
-      }
-      return reorderedIds;
+        const reorderedIds = JSON.parse(cleanedText);
+        if (!Array.isArray(reorderedIds)) {
+            throw new Error("Invalid response format from Gemini. Expected an array of IDs.");
+        }
+        return reorderedIds;
     } catch (parseError) {
-      console.error("Failed to parse GPT-4 response:", parseError, "Cleaned Text:", cleanedText);
-      throw new Error("Response from GPT-4 could not be parsed as a valid array.");
+      console.error(
+        "Failed to parse Gemini response:",
+        parseError,
+        "Cleaned Text:",
+        cleanedText
+      );
+      throw new Error("Response from Gemini could not be parsed as a valid array.");
     }
   } catch (error) {
-    console.error("Error reordering results with GPT:", error);
+    console.error("Error reordering results with Gemini:", error);
     throw error;
   }
 }
