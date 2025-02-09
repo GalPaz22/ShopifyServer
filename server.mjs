@@ -710,7 +710,7 @@ app.post("/search", async (req, res) => {
         ...orderedProducts.map((product) => ({
           id: product._id.toString(),
           name: product.name,
-          description: product.description1,
+          description: product.description,
           price: product.price,
           image: product.image,
           url: product.url,
