@@ -410,7 +410,7 @@ async function reorderResultsWithGPT(
 
 1. Ignore pricing details (already filtered).
 2. Output must be a plain array of IDs, no extra text.
-3. ONLY return the most relevant products related to the query.
+3. ONLY return the most relevant products related to the query ranked in the right order, but never more that 10.
 
 ` }],
       },
