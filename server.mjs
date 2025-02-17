@@ -18,7 +18,7 @@ app.use(cors({ origin: "*" }));
 // Initialize OpenAI client
 
 const genAI = new GoogleGenerativeAI( process.env.GOOGLE_API_KEY );
-const model = genAI.getGenerativeModel({ model: "	gemini-2.0-flash-001" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-001" });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const mongodbUri = process.env.MONGODB_URI;
 
@@ -410,9 +410,8 @@ async function reorderResultsWithGPT(
 
 1. Ignore pricing details (already filtered).
 2. Output must be a plain array of IDs, no extra text.
-3. Rank strictly by product names and descriptions.
-4. Return at least 4 but no more than 8 product IDs.
-5. Perform any necessary reasoning internally and briefly—do not output your chain-of-thought. Provide the final answer quickly.
+3. ONLY return the most relevant products related to the query.
+
 ` }],
       },
       {
@@ -573,33 +572,42 @@ example: [ "id1", "id2", "id3", "id4" ]
 }
 
 async function getProductsByIds(ids, dbName, collectionName) {
+  if (!ids || !Array.isArray(ids)) {
+    console.error("getProductsByIds: ids is not an array", ids);
+    return []; // or throw an error if that's preferred
+  }
   try {
     const client = await connectToMongoDB(mongodbUri);
     const db = client.db(dbName);
     const collection = db.collection(collectionName);
 
-    const objectIdArray = ids.map(id => {
-      try {
-        return new ObjectId(id);
-      } catch (error) {
-        console.error(`Invalid ObjectId format: ${id}`);
-        return null;
-      }
-    }).filter(id => id !== null);
+    const objectIdArray = ids
+      .map((id) => {
+        try {
+          return new ObjectId(id);
+        } catch (error) {
+          console.error(`Invalid ObjectId format: ${id}`);
+          return null;
+        }
+      })
+      .filter((id) => id !== null);
 
-    const products = await collection.find({ _id: { $in: objectIdArray } }).toArray();
+    const products = await collection
+      .find({ _id: { $in: objectIdArray } })
+      .toArray();
 
-    const orderedProducts = ids.map(id => products.find(product => product && product._id.toString() === id))
-                                 .filter(product => product !== undefined);
+    const orderedProducts = ids
+      .map((id) => products.find((p) => p && p._id.toString() === id))
+      .filter((product) => product !== undefined);
 
     console.log(`Number of products returned: ${orderedProducts.length}/${ids.length}`);
-
     return orderedProducts;
   } catch (error) {
     console.error("Error fetching products by IDs:", error);
     throw error;
   }
 }
+
 
 app.post("/search", async (req, res) => {
   const {
@@ -694,9 +702,15 @@ app.post("/search", async (req, res) => {
       })
       .sort((a, b) => b.rrf_score - a.rrf_score);
 
-      const reorderFn = useImages ? reorderImagesWithGPT : reorderResultsWithGPT;
-      const reorderedIds = await reorderFn(combinedResults, translatedQuery, query);
-  
+      let reorderedIds;
+      try {
+        const reorderFn = useImages ? reorderImagesWithGPT : reorderResultsWithGPT;
+        reorderedIds = await reorderFn(combinedResults, translatedQuery, query);
+      } catch (error) {
+        console.error("LLM reordering failed, falling back to default ordering:", error);
+        // Fallback: use the combinedResults order (which is already ranked by RRF)
+        reorderedIds = combinedResults.map((result) => result._id.toString());
+      }
       // 8) Retrieve final product docs in the GPT order
       const orderedProducts = await getProductsByIds(reorderedIds, dbName, collectionName);
   
