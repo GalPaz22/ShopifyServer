@@ -167,7 +167,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters = {}) => {
   }
 
   if (filters.type != null) {
-    matchStage.type = { $regex: filters.type, $options: "i" };
+    matchStage.type = filters.type
   }
 
   if (filters.minPrice != null && filters.maxPrice != null) {
