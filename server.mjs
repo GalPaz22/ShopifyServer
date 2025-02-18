@@ -394,13 +394,13 @@ async function reorderResultsWithGPT(
     const messages = [
       {
         role: "user",
-        parts: [{ text: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given "${translatedQuery}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **most relevant product IDs** based solely on how well the product names and descriptions match the query.
+        parts: [{ text: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given an english-translated query "${translatedQuery}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **most relevant product IDs** based solely on how well the product names and descriptions match the query.
 
 ### Key Instructions:
-
-1. Ignore pricing details (already filtered).
-2. Output must be a plain array of IDs, no extra text.
-3. ONLY return the most relevant products related to the query ranked in the right order, but never more that 10.
+1. you will get the original language query as well- ${query}- pay attention to match keyword based searches (other than semantic searches).
+2. Ignore pricing details (already filtered).
+3. Output must be a plain array of IDs, no extra text.
+4. ONLY return the most relevant products related to the query ranked in the right order, but never more that 10.
 
 ` }],
       },
