@@ -64,7 +64,7 @@ const buildAutocompletePipeline = (query, indexName, path) => {
   });
 
   pipeline.push(
-    { $limit: 10 },
+    { $limit: 5 },
     {
       $project: {
         _id: 0,
