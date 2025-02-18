@@ -400,7 +400,7 @@ async function reorderResultsWithGPT(
 1. you will get the original language query as well- ${query}- pay attention to match keyword based searches (other than semantic searches).
 2. Ignore pricing details (already filtered).
 3. Output must be a plain array of IDs, no extra text.
-4. ONLY return the most relevant products related to the query ranked in the right order, but never more that 10.
+4. ONLY return the most relevant products related to the query ranked in the right order, but **never more that 10**.
 
 ` }],
       },
