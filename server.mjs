@@ -136,6 +136,7 @@ function extractCategoryUsingRegex(query, categories) {
     .split(",")
     .map(cat => cat.trim())
     .filter(cat => cat.length > 0);
+    console.log(catArray)
   
   // For each category, check if it appears in the query as a standalone word.
   // We use (^|[^\p{L}]) before and ($|[^\p{L}]) after, which means either the start/end of the string
