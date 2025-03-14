@@ -130,24 +130,24 @@ app.get("/autocomplete", async (req, res) => {
   }
 });
 
-function extractCategoryUsingRegex(query, categories) {
-  // Convert comma-separated string into an array.
-  const catArray = categories
-    .split(",")
-    .map(cat => cat.trim())
-    .filter(cat => cat.length > 0);
-    console.log(catArray)
-  
-  // For each category, check if it appears in the query as a standalone word.
-  // We use (^|[^\p{L}]) before and ($|[^\p{L}]) after, which means either the start/end of the string
-  // or any character that is not a letter. The "u" flag enables Unicode mode.
+function extractCategoriesUsingRegex(query, categories) {
+  // If categories is an array, use it as is; if it's a string, split it by commas.
+  let catArray = [];
+  if (Array.isArray(categories)) {
+    catArray = categories;
+  } else if (typeof categories === "string") {
+    catArray = categories.split(",").map(cat => cat.trim()).filter(cat => cat.length > 0);
+  }
+
+  const matchedCategories = [];
+  // For each category, check if it appears in the query as a whole word using a Unicode‑aware regex.
   for (const cat of catArray) {
     const regex = new RegExp(`(^|[^\\p{L}])${cat}($|[^\\p{L}])`, "iu");
     if (regex.test(query)) {
-      return cat;
+      matchedCategories.push(cat);
     }
   }
-  return null;
+  return matchedCategories;
 }
 
 const buildFuzzySearchPipeline = (cleanedHebrewText, filters = {}) => {
@@ -652,17 +652,17 @@ app.post("/search", async (req, res) => {
     const cleanedText = removeWineFromQuery(translatedQuery, noWord);
     console.log("Cleaned query for embedding:", cleanedText);
 
-        // Attempt to extract the category using regex from the comma-separated string.
-        let filters = {};
-        const regexCategory = extractCategoryUsingRegex(query, categories);
-        if (regexCategory) {
-          console.log("Category matched via regex:", regexCategory);
-          filters.category = regexCategory;
-        } else {
-          // Fall back to LLM-based extraction if regex matching fails.
-          filters = await extractFiltersFromQuery(query, categories, types, example);
-          console.log("Filters extracted via LLM:", filters);
-        }
+ // Attempt to extract categories using regex.
+ let filters = {};
+ const regexCategories = extractCategoriesUsingRegex(query, categories);
+ if (regexCategories.length > 0) {
+   console.log("Categories matched via regex:", regexCategories);
+   filters.category = regexCategories;
+ } else {
+   // Fall back to LLM-based extraction if regex matching fails.
+   filters = await extractFiltersFromQuery(query, categories, types, example);
+   console.log("Filters extracted via LLM:", filters);
+ }
 
     logQuery(querycollection, query, filters);
 
