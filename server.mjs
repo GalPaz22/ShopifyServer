@@ -131,19 +131,31 @@ app.get("/autocomplete", async (req, res) => {
 });
 
 function extractCategoriesUsingRegex(query, categories) {
-  // If categories is an array, use it as is; if it's a string, split it by commas.
   let catArray = [];
   if (Array.isArray(categories)) {
     catArray = categories;
   } else if (typeof categories === "string") {
-    catArray = categories.split(",").map(cat => cat.trim()).filter(cat => cat.length > 0);
+    catArray = categories
+      .split(",")
+      .map(cat => cat.trim())
+      .filter(cat => cat.length > 0);
   }
 
   const matchedCategories = [];
-  // For each category, check if it appears in the query as a whole word using a Unicode‑aware regex.
+  // For each category, split it into words and check if any appear in the query.
   for (const cat of catArray) {
-    const regex = new RegExp(`(^|[^\\p{L}])${cat}($|[^\\p{L}])`, "iu");
-    if (regex.test(query)) {
+    // Split the category into individual words.
+    const words = cat.split(/\s+/);
+    let matchFound = false;
+    for (const word of words) {
+      // Build a Unicode‑aware regex to match the word as a whole word.
+      const regex = new RegExp(`(^|[^\\p{L}])${word}($|[^\\p{L}])`, "iu");
+      if (regex.test(query)) {
+        matchFound = true;
+        break;
+      }
+    }
+    if (matchFound) {
       matchedCategories.push(cat);
     }
   }
