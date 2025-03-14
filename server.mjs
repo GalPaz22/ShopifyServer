@@ -131,17 +131,17 @@ app.get("/autocomplete", async (req, res) => {
 });
 
 function extractCategoryUsingRegex(query, categories) {
-  // Convert comma-separated string into an array
+  // Convert comma-separated string into an array.
   const catArray = categories
     .split(",")
     .map(cat => cat.trim())
     .filter(cat => cat.length > 0);
-
-    console.log(catArray);
   
-  // Check if any category appears in the query as a standalone word (case-insensitive)
+  // For each category, check if it appears in the query as a standalone word.
+  // We use (^|[^\p{L}]) before and ($|[^\p{L}]) after, which means either the start/end of the string
+  // or any character that is not a letter. The "u" flag enables Unicode mode.
   for (const cat of catArray) {
-    const regex = new RegExp(`\\b${cat}\\b`, "i");
+    const regex = new RegExp(`(^|[^\\p{L}])${cat}($|[^\\p{L}])`, "iu");
     if (regex.test(query)) {
       return cat;
     }
