@@ -136,6 +136,8 @@ function extractCategoryUsingRegex(query, categories) {
     .split(",")
     .map(cat => cat.trim())
     .filter(cat => cat.length > 0);
+
+    console.log(catArray);
   
   // Check if any category appears in the query as a standalone word (case-insensitive)
   for (const cat of catArray) {
