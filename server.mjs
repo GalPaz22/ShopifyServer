@@ -130,6 +130,23 @@ app.get("/autocomplete", async (req, res) => {
   }
 });
 
+function extractCategoryUsingRegex(query, categories) {
+  // Convert comma-separated string into an array
+  const catArray = categories
+    .split(",")
+    .map(cat => cat.trim())
+    .filter(cat => cat.length > 0);
+  
+  // Check if any category appears in the query as a standalone word (case-insensitive)
+  for (const cat of catArray) {
+    const regex = new RegExp(`\\b${cat}\\b`, "i");
+    if (regex.test(query)) {
+      return cat;
+    }
+  }
+  return null;
+}
+
 const buildFuzzySearchPipeline = (cleanedHebrewText, filters = {}) => {
   const pipeline = [
     {
@@ -632,7 +649,17 @@ app.post("/search", async (req, res) => {
     const cleanedText = removeWineFromQuery(translatedQuery, noWord);
     console.log("Cleaned query for embedding:", cleanedText);
 
-    const filters = await extractFiltersFromQuery(query, categories, types, example);
+        // Attempt to extract the category using regex from the comma-separated string.
+        let filters = {};
+        const regexCategory = extractCategoryUsingRegex(query, categories);
+        if (regexCategory) {
+          console.log("Category matched via regex:", regexCategory);
+          filters.category = regexCategory;
+        } else {
+          // Fall back to LLM-based extraction if regex matching fails.
+          filters = await extractFiltersFromQuery(query, categories, types, example);
+          console.log("Filters extracted via LLM:", filters);
+        }
 
     logQuery(querycollection, query, filters);
 
