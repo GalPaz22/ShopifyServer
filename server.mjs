@@ -131,6 +131,7 @@ app.get("/autocomplete", async (req, res) => {
 });
 
 function extractCategoriesUsingRegex(query, categories) {
+  // Normalize categories to an array.
   let catArray = [];
   if (Array.isArray(categories)) {
     catArray = categories;
@@ -141,26 +142,37 @@ function extractCategoriesUsingRegex(query, categories) {
       .filter(cat => cat.length > 0);
   }
 
-  const matchedCategories = [];
-  // For each category, split it into words and check if any appear in the query.
+  // First, try to find full phrase matches.
+  const fullMatches = [];
+  for (const cat of catArray) {
+    // Build a Unicode-aware regex for the full category phrase.
+    const regexFull = new RegExp(`(^|[^\\p{L}])${cat}($|[^\\p{L}])`, "iu");
+    if (regexFull.test(query)) {
+      fullMatches.push(cat);
+    }
+  }
+
+  // If any full phrase matches exist, return only those.
+  if (fullMatches.length > 0) {
+    return fullMatches;
+  }
+
+  // Otherwise, fall back to partial matching: if any word in the category appears.
+  const partialMatches = [];
   for (const cat of catArray) {
     // Split the category into individual words.
     const words = cat.split(/\s+/);
-    let matchFound = false;
     for (const word of words) {
-      // Build a Unicode‑aware regex to match the word as a whole word.
-      const regex = new RegExp(`(^|[^\\p{L}])${word}($|[^\\p{L}])`, "iu");
-      if (regex.test(query)) {
-        matchFound = true;
+      const regexPartial = new RegExp(`(^|[^\\p{L}])${word}($|[^\\p{L}])`, "iu");
+      if (regexPartial.test(query)) {
+        partialMatches.push(cat);
         break;
       }
     }
-    if (matchFound) {
-      matchedCategories.push(cat);
-    }
   }
-  return matchedCategories;
+  return partialMatches;
 }
+
 
 const buildFuzzySearchPipeline = (cleanedHebrewText, filters = {}) => {
   const pipeline = [
