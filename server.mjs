@@ -773,7 +773,8 @@ app.post("/search", async (req, res) => {
           image: product.image,
           url: product.url,
           highlight: true,
-          onSale: product.onSale
+          onSale: product.onSale,
+          type: product.type
         })),
         ...remainingResults.map((r) => ({
           id: r._id.toString(),
@@ -782,7 +783,8 @@ app.post("/search", async (req, res) => {
           price: r.price,
           image: r.image,
           url: r.url,
-          onSale:r.onSale
+          onSale:r.onSale,
+          type: r.type
         })),
       ];
   
