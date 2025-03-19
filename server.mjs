@@ -187,6 +187,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters = {}) => {
                 path: "name",
                 fuzzy: { maxEdits: 2, prefixLength: 1, maxExpansions: 50 },
               },
+              score: { boost: { value: 2 } } // Boost for the "name" field
             },
             {
               text: {
@@ -676,17 +677,27 @@ app.post("/search", async (req, res) => {
     const cleanedText = removeWineFromQuery(translatedQuery, noWord);
     console.log("Cleaned query for embedding:", cleanedText);
 
- // Attempt to extract categories using regex.
- let filters = {};
- const regexCategories = extractCategoriesUsingRegex(query, categories);
- if (regexCategories.length > 0) {
-   console.log("Categories matched via regex:", regexCategories);
-   filters.category = regexCategories;
- } else {
-   // Fall back to LLM-based extraction if regex matching fails.
-   filters = await extractFiltersFromQuery(query, categories, types, example);
-   console.log("Filters extracted via LLM:", filters);
- }
+
+// Attempt to extract categories using regex.
+let filters = {};
+const regexCategories = extractCategoriesUsingRegex(query, categories);
+if (regexCategories.length > 0) {
+  console.log("Categories matched via regex:", regexCategories);
+  filters.category = regexCategories;
+}
+
+// Run LLM-based extraction and merge results.
+const llmFilters = await extractFiltersFromQuery(query, categories, types, example);
+console.log("Filters extracted via LLM:", llmFilters);
+
+// Merge LLM-extracted categories with regex-extracted categories.
+if (llmFilters.category) {
+  if (filters.category) {
+    filters.category = [...new Set([...filters.category, ...llmFilters.category])];
+  } else {
+    filters.category = llmFilters.category;
+  }
+}
 
     logQuery(querycollection, query, filters);
 
