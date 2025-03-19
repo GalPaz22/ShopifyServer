@@ -194,6 +194,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters = {}) => {
                 query: cleanedHebrewText,
                 path: "description",
                 fuzzy: { maxEdits: 2, prefixLength: 1, maxExpansions: 50 },
+                score: { boost: { value: 2 } }, // Boosting the name matches
               },
             },
           ],
@@ -236,7 +237,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters = {}) => {
   ];
 
   pipeline.push({ $match: matchStage });
-  pipeline.push({ $limit: 10 });
+  pipeline.push({ $limit: 15 });
 
   return pipeline;
 };
