@@ -212,7 +212,10 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
 
   if (filters && Object.keys(filters).length > 0) {
     const matchStage = {};
-
+    matchStage.$or = [
+      { stockStatus: { $exists: false } },
+      { stockStatus: "instock" },
+    ];
    
     if (filters.type ?? null) {
       matchStage.type = { $regex: filters.type, $options: "i" };
@@ -229,10 +232,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
       const priceRange = price * 0.15;
       matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
     }
-    matchStage.$or = [
-      { stockStatus: { $exists: false } },
-      { stockStatus: "instock" },
-    ];
+   
 
     if (Object.keys(matchStage).length > 0) {
       pipeline.push({ $match: matchStage });
