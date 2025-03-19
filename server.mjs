@@ -190,7 +190,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
                   prefixLength: 3,
                   maxExpansions: 50,
                 },
-                score: { boost: { value: 2 } } // Boost for the "name" field
+                score: { boost: { value: 5 } } // Boost for the "name" field
               }
             },
             {
@@ -213,6 +213,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
   if (filters && Object.keys(filters).length > 0) {
     const matchStage = {};
 
+   
     if (filters.type ?? null) {
       matchStage.type = { $regex: filters.type, $options: "i" };
     }
@@ -441,7 +442,7 @@ async function reorderResultsWithGPT(
     const messages = [
       {
         role: "user",
-        parts: [{ text: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given an english-translated query "${translatedQuery}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **most relevant product IDs** based solely on how well the product names and descriptions match the query.
+        parts: [{ text: `You are an advanced AI model specializing in e-commerce queries. Your role is to analyze a given an english-translated query "${query}" from an e-commerce site, along with a provided list of products (each including a name and description), and return the **most relevant product IDs** based solely on how well the product names and descriptions match the query.
 
 ### Key Instructions:
 1. you will get the original language query as well- ${query}- pay attention to match keyword based searches (other than semantic searches).
@@ -688,11 +689,11 @@ if (regexCategories.length > 0) {
   filters.category = regexCategories;
 }
 
-// Run LLM-based extraction and merge results.
+// Run LLM-based extraction.
 const llmFilters = await extractFiltersFromQuery(query, categories, types, example);
 console.log("Filters extracted via LLM:", llmFilters);
 
-// Merge LLM-extracted categories with regex-extracted categories.
+// Merge LLM-extracted category with regex categories.
 if (llmFilters.category) {
   if (filters.category) {
     filters.category = [...new Set([...filters.category, ...llmFilters.category])];
@@ -700,6 +701,22 @@ if (llmFilters.category) {
     filters.category = llmFilters.category;
   }
 }
+
+// Merge other filters extracted by the LLM.
+if (llmFilters.minPrice !== undefined) {
+  filters.minPrice = llmFilters.minPrice;
+}
+if (llmFilters.maxPrice !== undefined) {
+  filters.maxPrice = llmFilters.maxPrice;
+}
+if (llmFilters.type) {
+  filters.type = llmFilters.type;
+}
+if (llmFilters.price) {
+  filters.price = llmFilters.price;
+}
+
+console.log("Final filters:", filters);
 
     logQuery(querycollection, query, filters);
 
