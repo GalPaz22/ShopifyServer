@@ -183,7 +183,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
           should: [
             {
               text: {
-                query: query,
+                query: cleanedHebrewText,
                 path: "name",
                 fuzzy: {
                   maxEdits: 2,
@@ -195,7 +195,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
             },
             {
               text: {
-                query: query,
+                query: cleanedHebrewText,
                 path: "description",
                 fuzzy: {
                   maxEdits: 2,
@@ -721,7 +721,7 @@ if (llmFilters.category) {
     const cleanedHebrewText = removeWordsFromQuery(query, noHebrewWord);
     console.log("Cleaned query for fuzzy search:", cleanedHebrewText);
 
-    const fuzzySearchPipeline = buildFuzzySearchPipeline(cleanedHebrewText, query, filters);
+    const fuzzySearchPipeline = buildFuzzySearchPipeline(cleanedHebrewText, filters);
     const fuzzyResults = await collection.aggregate(fuzzySearchPipeline).toArray();
 
     const vectorSearchPipeline = buildVectorSearchPipeline(queryEmbedding, filters);
