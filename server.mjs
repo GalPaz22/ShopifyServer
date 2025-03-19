@@ -174,7 +174,7 @@ function extractCategoriesUsingRegex(query, categories) {
 }
 
 
-const buildFuzzySearchPipeline = (cleanedHebrewText, filters = {}) => {
+const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
   const pipeline = [
     {
       $search: {
@@ -183,64 +183,65 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, filters = {}) => {
           should: [
             {
               text: {
-                query: cleanedHebrewText,
+                query: query,
                 path: "name",
-                fuzzy: { maxEdits: 2, prefixLength: 1, maxExpansions: 50 },
-              },
-              
+                fuzzy: {
+                  maxEdits: 2,
+                  prefixLength: 3,
+                  maxExpansions: 50,
+                },
+                score: { boost: { value: 2 } } // Boost for the "name" field
+              }
             },
             {
               text: {
-                query: cleanedHebrewText,
+                query: query,
                 path: "description",
-                fuzzy: { maxEdits: 2, prefixLength: 1, maxExpansions: 50 },
-                score: { boost: { value: 2 } }, // Boosting the name matches
-              },
-            },
-          ],
-        },
-      },
-    },
+                fuzzy: {
+                  maxEdits: 2,
+                  prefixLength: 3,
+                  maxExpansions: 50,
+                },
+              }
+            }
+          ]
+        }
+      }
+    }
   ];
 
-  // Build the match stage for any additional filters.
-  const matchStage = {};
+  if (filters && Object.keys(filters).length > 0) {
+    const matchStage = {};
 
-  if (filters.category != null) {
-    matchStage.category = Array.isArray(filters.category)
-      ? { $in: filters.category }
-      : filters.category;
+    if (filters.type ?? null) {
+      matchStage.type = { $regex: filters.type, $options: "i" };
+    }
+    if (filters.minPrice && filters.maxPrice) {
+      matchStage.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
+    } else if (filters.minPrice) {
+      matchStage.price = { $gte: filters.minPrice };
+    } else if (filters.maxPrice) {
+      matchStage.price = { $lte: filters.maxPrice };
+    }
+    if (filters.price) {
+      const price = filters.price;
+      const priceRange = price * 0.15;
+      matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
+    }
+    matchStage.$or = [
+      { stockStatus: { $exists: false } },
+      { stockStatus: "instock" },
+    ];
+
+    if (Object.keys(matchStage).length > 0) {
+      pipeline.push({ $match: matchStage });
+    }
   }
 
-  if (filters.type != null) {
-    matchStage.type = filters.type
-  }
-
-  if (filters.minPrice != null && filters.maxPrice != null) {
-    matchStage.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
-  } else if (filters.minPrice != null) {
-    matchStage.price = { $gte: filters.minPrice };
-  } else if (filters.maxPrice != null) {
-    matchStage.price = { $lte: filters.maxPrice };
-  }
-
-  if (filters.price != null) {
-    const price = filters.price;
-    const priceRange = price * 0.15;
-    matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
-  }
-
-  // Always filter out out‑of‑stock products:
-  matchStage.$or = [
-    { stockStatus: { $exists: false } },
-    { stockStatus: "instock" },
-  ];
-
-  pipeline.push({ $match: matchStage });
-  pipeline.push({ $limit: 15 });
-
+  pipeline.push({ $limit: 10 });
   return pipeline;
 };
+
 
 
 function buildVectorSearchPipeline(queryEmbedding, filters = {}) {
@@ -720,7 +721,7 @@ if (llmFilters.category) {
     const cleanedHebrewText = removeWordsFromQuery(query, noHebrewWord);
     console.log("Cleaned query for fuzzy search:", cleanedHebrewText);
 
-    const fuzzySearchPipeline = buildFuzzySearchPipeline(cleanedHebrewText, filters);
+    const fuzzySearchPipeline = buildFuzzySearchPipeline(cleanedHebrewText, query, filters);
     const fuzzyResults = await collection.aggregate(fuzzySearchPipeline).toArray();
 
     const vectorSearchPipeline = buildVectorSearchPipeline(queryEmbedding, filters);
