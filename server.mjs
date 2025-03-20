@@ -358,7 +358,7 @@ function removeWordsFromQuery(query, noHebrewWord) {
 
   const queryWords = query.split(" ");
   const filteredWords = queryWords.filter((word) => {
-    return !noHebrewWord.includes(word.toLowerCase() && isNaN(word));
+    return !noHebrewWord.includes(word) && isNaN(word);
   });
 
   return filteredWords.join(" ");
