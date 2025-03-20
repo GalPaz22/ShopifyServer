@@ -205,6 +205,9 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
               }
             }
           ]
+          
+          
+
         }
       }
     }
@@ -216,7 +219,7 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
       { stockStatus: { $exists: false } },
       { stockStatus: "instock" },
     ];
-    
+
     if (filters.type ?? null) {
       matchStage.type = { $regex: filters.type, $options: "i" };
     }
