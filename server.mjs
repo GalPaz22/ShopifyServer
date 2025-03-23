@@ -839,13 +839,8 @@ console.log("Final filters:", filters);
     const cleanedHebrewText = removeWordsFromQuery(query, noHebrewWord);
     console.log("Cleaned query for fuzzy search:", cleanedHebrewText);
 
-    let fuzzyResults = [];
-    if (fuzzySearchPipeline.length > 0) {
-      fuzzyResults = await collection.aggregate(fuzzySearchPipeline).toArray();
-      console.log(`Fuzzy search returned ${fuzzyResults.length} results`);
-    } else {
-      console.log("Fuzzy search skipped - will rely only on vector results");
-    }
+    const fuzzySearchPipeline = buildFuzzySearchPipeline(cleanedHebrewText, query, filters);
+    const fuzzyResults = await collection.aggregate(fuzzySearchPipeline).toArray();
 
     const vectorSearchPipeline = buildVectorSearchPipeline(queryEmbedding, filters);
     const vectorResults = await collection.aggregate(vectorSearchPipeline).toArray();
