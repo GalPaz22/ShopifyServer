@@ -823,7 +823,7 @@ console.log("Final filters:", filters);
     const cleanedHebrewText = removeWordsFromQuery(query, noHebrewWord);
     console.log("Cleaned query for fuzzy search:", cleanedHebrewText);
 
-    const fuzzySearchPipeline = buildFuzzySearchPipeline(cleanedHebrewText, filters);
+    const fuzzySearchPipeline = buildFuzzySearchPipeline(cleanedHebrewText, query, filters);
     const fuzzyResults = await collection.aggregate(fuzzySearchPipeline).toArray();
 
     const vectorSearchPipeline = buildVectorSearchPipeline(queryEmbedding, filters);
