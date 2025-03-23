@@ -131,7 +131,7 @@ app.get("/autocomplete", async (req, res) => {
 });
 
 function extractCategoriesUsingRegex(query, categories) {
-  // Normalize categories to an array.
+  // Normalize categories to an array
   let catArray = [];
   if (Array.isArray(categories)) {
     catArray = categories;
@@ -141,42 +141,96 @@ function extractCategoriesUsingRegex(query, categories) {
       .map(cat => cat.trim())
       .filter(cat => cat.length > 0);
   }
-
-  // First, try to find full phrase matches.
+  
+  // Sort categories by length (descending) to prioritize longer, more specific matches
+  // This ensures "יין אדום" is checked before "יין"
+  catArray.sort((a, b) => b.length - a.length);
+  
+  // First, try to find full phrase matches
   const fullMatches = [];
   for (const cat of catArray) {
-    // Build a Unicode-aware regex for the full category phrase.
+    // Build a Unicode-aware regex for the full category phrase
     const regexFull = new RegExp(`(^|[^\\p{L}])${cat}($|[^\\p{L}])`, "iu");
     if (regexFull.test(query)) {
       fullMatches.push(cat);
+      // If we find a specific match, return it immediately without checking shorter categories
+      // This prevents "יין" from matching when "יין אדום" already matched
+      return [cat];
     }
   }
-
-  // If any full phrase matches exist, return only those.
+  
+  // If any full phrase matches exist, return only those
   if (fullMatches.length > 0) {
     return fullMatches;
   }
-
-  // Otherwise, fall back to partial matching: if any word in the category appears.
+  
+  // Otherwise, fall back to partial matching with additional specificity rules
   const partialMatches = [];
+  const matchedWords = new Set(); // Keep track of matched words to avoid overlapping categories
+  
   for (const cat of catArray) {
-    // Split the category into individual words.
+    // Split the category into individual words
     const words = cat.split(/\s+/);
+    
+    // Track how many words from this category match the query
+    let matchedWordsCount = 0;
+    let alreadyMatchedWord = false;
+    
     for (const word of words) {
+      // Skip very short words (optional, can be adjusted)
+      if (word.length < 2) continue;
+      
       const regexPartial = new RegExp(`(^|[^\\p{L}])${word}($|[^\\p{L}])`, "iu");
       if (regexPartial.test(query)) {
-        partialMatches.push(cat);
-        break;
+        matchedWordsCount++;
+        // Check if this word already contributed to another category match
+        if (matchedWords.has(word)) {
+          alreadyMatchedWord = true;
+        } else {
+          matchedWords.add(word);
+        }
       }
     }
+    
+    // Add category if it has a good match ratio and doesn't overlap too much
+    if (matchedWordsCount > 0 && 
+        (matchedWordsCount / words.length > 0.5 || !alreadyMatchedWord)) {
+      partialMatches.push({
+        category: cat,
+        matchRatio: matchedWordsCount / words.length,
+        specificity: words.length
+      });
+    }
   }
-  return partialMatches;
+  
+  // Sort by match ratio and specificity, and return the best matches
+  partialMatches.sort((a, b) => {
+    // First prioritize match ratio
+    if (b.matchRatio !== a.matchRatio) {
+      return b.matchRatio - a.matchRatio;
+    }
+    // Then prioritize more specific (longer) categories
+    return b.specificity - a.specificity;
+  });
+  
+  // If we have a clearly best match, return only that one
+  if (partialMatches.length > 0 && 
+      partialMatches[0].matchRatio >= 0.7 &&
+      (partialMatches.length === 1 || partialMatches[0].matchRatio > partialMatches[1].matchRatio)) {
+    return [partialMatches[0].category];
+  }
+  
+  // Otherwise return all partial matches (or empty array if none found)
+  return partialMatches.map(match => match.category);
 }
 
 
 const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
-  const pipeline = [
-    {
+  const pipeline = [];
+  
+  // Only add the $search stage if we have a non-empty search query
+  if (cleanedHebrewText && cleanedHebrewText.trim() !== '') {
+    pipeline.push({
       $search: {
         index: "default",
         compound: {
@@ -204,41 +258,62 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
                 },
               }
             }
-          ]
-          
-          
-
+          ],
+          // Important: Add filter section inside the compound search operator
+          filter: []
         }
       }
-    }
-  ];
+    });
+  } else {
+    // If no search query is provided, start with a simple $match stage
+    // This allows returning results even without search terms
+    pipeline.push({ $match: {} });
+  }
 
+  // Define filter conditions to apply as part of the $search stage
+  // Only used if we have a search query
+  const searchFilters = [];
+  
+  // Build stock status filter (only used in $search compound if present)
+  if (pipeline.length > 0 && pipeline[0].$search) {
+    searchFilters.push({
+      text: {
+        query: "instock",
+        path: "stockStatus"
+      }
+    });
+  }
+
+  // Now handle the other filters
   if (filters && Object.keys(filters).length > 0) {
+    // Add filter stage for after the search
     const matchStage = {};
-
-
-    if (filters.type ?? null) {
+    
+    // Type filter
+    if (filters.type) {
       matchStage.type = { $regex: filters.type, $options: "i" };
     }
+    
+    // Price filters
     if (filters.minPrice && filters.maxPrice) {
       matchStage.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
     } else if (filters.minPrice) {
       matchStage.price = { $gte: filters.minPrice };
     } else if (filters.maxPrice) {
       matchStage.price = { $lte: filters.maxPrice };
-    }
-    if (filters.price) {
+    } else if (filters.price) {
       const price = filters.price;
       const priceRange = price * 0.15;
       matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
     }
-   
-
+    
+    // Add the match stage if we have any filters to apply
     if (Object.keys(matchStage).length > 0) {
       pipeline.push({ $match: matchStage });
     }
   }
-
+  
+  // Always add stock status match as a separate stage for items where stockStatus isn't defined
   pipeline.push({
     $match: {
       $or: [
@@ -247,10 +322,12 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
       ],
     },
   });
-  pipeline.push({ $limit: 10 });
+  
+  // Limit results
+  pipeline.push({ $limit: 5 });
+  
   return pipeline;
 };
-
 
 
 function buildVectorSearchPipeline(queryEmbedding, filters = {}) {
@@ -352,17 +429,17 @@ function removeWineFromQuery(translatedQuery, noWord) {
 
   return filteredWords.join(" ");
 }
-
 function removeWordsFromQuery(query, noHebrewWord) {
   if (!noHebrewWord) return query;
 
   const queryWords = query.split(" ");
   const filteredWords = queryWords.filter((word) => {
-    return !noHebrewWord.includes(word.toLowerCase() && isNaN(word));
+    return !noHebrewWord.includes(word) && isNaN(word);
   });
 
   return filteredWords.join(" ");
 }
+
 
 async function extractFiltersFromQuery(query, categories, types, example) {
   try {
