@@ -228,48 +228,47 @@ function extractCategoriesUsingRegex(query, categories) {
 const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
   console.log("Building fuzzy search pipeline with filters:", JSON.stringify(filters));
   
-  // If cleanedHebrewText is empty, return an empty array to signal that fuzzy search should be skipped
-  if (!cleanedHebrewText || cleanedHebrewText.trim() === '') {
-    console.log("Skipping fuzzy search due to empty query");
-    return [];
-  }
-  
   const pipeline = [];
   
-  // Add the $search stage since we have a non-empty search query
-  pipeline.push({
-    $search: {
-      index: "default",
-      compound: {
-        should: [
-          {
-            text: {
-              query: cleanedHebrewText,
-              path: "name",
-              fuzzy: {
-                maxEdits: 2,
-                prefixLength: 3,
-                maxExpansions: 50,
-              },
-              score: { boost: { value: 5 } } // Boost for the "name" field
+  // Only add the $search stage if we have a non-empty search query
+  if (cleanedHebrewText && cleanedHebrewText.trim() !== '') {
+    pipeline.push({
+      $search: {
+        index: "default",
+        compound: {
+          should: [
+            {
+              text: {
+                query: cleanedHebrewText,
+                path: "name",
+                fuzzy: {
+                  maxEdits: 2,
+                  prefixLength: 3,
+                  maxExpansions: 50,
+                },
+                score: { boost: { value: 5 } } // Boost for the "name" field
+              }
+            },
+            {
+              text: {
+                query: cleanedHebrewText,
+                path: "description",
+                fuzzy: {
+                  maxEdits: 2,
+                  prefixLength: 3,
+                  maxExpansions: 50,
+                },
+              }
             }
-          },
-          {
-            text: {
-              query: cleanedHebrewText,
-              path: "description",
-              fuzzy: {
-                maxEdits: 2,
-                prefixLength: 3,
-                maxExpansions: 50,
-              },
-            }
-          }
-        ],
-        filter: [] // We're not using compound.filter - handling filters in separate $match stages
+          ],
+          filter: [] // We're not using compound.filter - handling filters in separate $match stages
+        }
       }
-    }
-  });
+    });
+  } else {
+    // If no search query is provided, start with a simple $match stage
+    pipeline.push({ $match: {} });
+  }
 
   // Handle stock status filter first
   pipeline.push({
