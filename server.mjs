@@ -226,6 +226,8 @@ function extractCategoriesUsingRegex(query, categories) {
 
 
 const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
+  console.log("Building fuzzy search pipeline with filters:", JSON.stringify(filters));
+  
   const pipeline = [];
   
   // Only add the $search stage if we have a non-empty search query
@@ -259,61 +261,16 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
               }
             }
           ],
-          // Important: Add filter section inside the compound search operator
-          filter: []
+          filter: [] // We're not using compound.filter - handling filters in separate $match stages
         }
       }
     });
   } else {
     // If no search query is provided, start with a simple $match stage
-    // This allows returning results even without search terms
     pipeline.push({ $match: {} });
   }
 
-  // Define filter conditions to apply as part of the $search stage
-  // Only used if we have a search query
-  const searchFilters = [];
-  
-  // Build stock status filter (only used in $search compound if present)
-  if (pipeline.length > 0 && pipeline[0].$search) {
-    searchFilters.push({
-      text: {
-        query: "instock",
-        path: "stockStatus"
-      }
-    });
-  }
-
-  // Now handle the other filters
-  if (filters && Object.keys(filters).length > 0) {
-    // Add filter stage for after the search
-    const matchStage = {};
-    
-    // Type filter
-    if (filters.type) {
-      matchStage.type = { $regex: filters.type, $options: "i" };
-    }
-    
-    // Price filters
-    if (filters.minPrice && filters.maxPrice) {
-      matchStage.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
-    } else if (filters.minPrice) {
-      matchStage.price = { $gte: filters.minPrice };
-    } else if (filters.maxPrice) {
-      matchStage.price = { $lte: filters.maxPrice };
-    } else if (filters.price) {
-      const price = filters.price;
-      const priceRange = price * 0.15;
-      matchStage.price = { $gte: price - priceRange, $lte: price + priceRange };
-    }
-    
-    // Add the match stage if we have any filters to apply
-    if (Object.keys(matchStage).length > 0) {
-      pipeline.push({ $match: matchStage });
-    }
-  }
-  
-  // Always add stock status match as a separate stage for items where stockStatus isn't defined
+  // Handle stock status filter first
   pipeline.push({
     $match: {
       $or: [
@@ -322,13 +279,71 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
       ],
     },
   });
+
+  // Now handle the other filters - create a separate match stage for price
+  if (filters && Object.keys(filters).length > 0) {
+    // Type filter
+    if (filters.type) {
+      pipeline.push({
+        $match: {
+          type: { $regex: filters.type, $options: "i" }
+        }
+      });
+    }
+    
+    // Category filter
+    if (filters.category) {
+      pipeline.push({
+        $match: {
+          category: Array.isArray(filters.category) 
+            ? { $in: filters.category } 
+            : filters.category
+        }
+      });
+    }
+    
+    // Price filters - ensure all values are converted to numbers
+    const priceMatch = {};
+    let hasPriceFilter = false;
+    
+    if (filters.minPrice !== undefined && filters.maxPrice !== undefined) {
+      priceMatch.$gte = Number(filters.minPrice);
+      priceMatch.$lte = Number(filters.maxPrice);
+      hasPriceFilter = true;
+    } else if (filters.minPrice !== undefined) {
+      priceMatch.$gte = Number(filters.minPrice);
+      hasPriceFilter = true;
+    } else if (filters.maxPrice !== undefined) {
+      priceMatch.$lte = Number(filters.maxPrice);
+      hasPriceFilter = true;
+    } else if (filters.price !== undefined) {
+      const price = Number(filters.price);
+      const priceRange = price * 0.15;
+      priceMatch.$gte = Math.max(0, price - priceRange); // Ensure price is not negative
+      priceMatch.$lte = price + priceRange;
+      hasPriceFilter = true;
+      
+      console.log(`Price filter range: ${priceMatch.$gte} to ${priceMatch.$lte}`);
+    }
+    
+    // Add the price match stage if we have price filters
+    if (hasPriceFilter) {
+      pipeline.push({
+        $match: {
+          price: priceMatch
+        }
+      });
+    }
+  }
   
-  // Limit results
+  // Add limit at the end
   pipeline.push({ $limit: 5 });
+  
+  // Log the pipeline for debugging
+  console.log("Fuzzy search pipeline:", JSON.stringify(pipeline));
   
   return pipeline;
 };
-
 
 function buildVectorSearchPipeline(queryEmbedding, filters = {}) {
   const filter = {};
