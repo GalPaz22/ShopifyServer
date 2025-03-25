@@ -281,15 +281,19 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
   });
 
   // Now handle the other filters - create a separate match stage for price
+// ...existing code...
+  // Now handle the other filters - create a separate match stage for price
   if (filters && Object.keys(filters).length > 0) {
-    // Type filter
+    // Type filter: support string or array without using regex
     if (filters.type) {
+      const typeFilter = Array.isArray(filters.type) ? filters.type : [filters.type];
       pipeline.push({
         $match: {
-          type: { $regex: filters.type, $options: "i" }
+          type: { $in: typeFilter }
         }
       });
     }
+    // ...existing code...
     
     // Category filter
     if (filters.category) {
