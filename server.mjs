@@ -359,10 +359,11 @@ function buildVectorSearchPipeline(queryEmbedding, filters = {}) {
       : filters.category;
   }
 
-  if (filters.type) {
-    filter.type = filters.type;
+  if (filters.typey) {
+    filter.type = Array.isArray(filters.type)
+      ? { $in: filters.type }
+      : filters.type;
   }
-
   if (filters.minPrice && filters.maxPrice) {
     filter.price = { $gte: filters.minPrice, $lte: filters.maxPrice };
   } else if (filters.minPrice) {
