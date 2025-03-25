@@ -286,10 +286,11 @@ const buildFuzzySearchPipeline = (cleanedHebrewText, query, filters) => {
   if (filters && Object.keys(filters).length > 0) {
     // Type filter: support string or array without using regex
     if (filters.type) {
-      const typeFilter = Array.isArray(filters.type) ? filters.type : [filters.type];
       pipeline.push({
         $match: {
-          type: { $in: typeFilter }
+          category: Array.isArray(filters.type) 
+            ? { $in: filters.type } 
+            : filters.type
         }
       });
     }
