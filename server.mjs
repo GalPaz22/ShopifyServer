@@ -650,7 +650,7 @@ example: [ "id1", "id2", "id3", "id4" ]
 `,
          },
          {
-             text:  JSON.stringify(productData, null, 2),
+             text:  JSON.stringify(productData, null, 4),
            },
          {
            text: JSON.stringify(
