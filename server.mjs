@@ -164,17 +164,15 @@ function extractCategoriesUsingRegex(query, categories) {
     return fullMatches;
   }
   
-  // Otherwise, fall back to partial matching with additional specificity rules
+  // Otherwise, fall back to partial matching without cross-category overlapping
   const partialMatches = [];
-  const matchedWords = new Set(); // Keep track of matched words to avoid overlapping categories
   
   for (const cat of catArray) {
     // Split the category into individual words
     const words = cat.split(/\s+/);
     
-    // Track how many words from this category match the query
+    // Count how many words from this category match the query
     let matchedWordsCount = 0;
-    let alreadyMatchedWord = false;
     
     for (const word of words) {
       // Skip very short words (optional, can be adjusted)
@@ -183,18 +181,11 @@ function extractCategoriesUsingRegex(query, categories) {
       const regexPartial = new RegExp(`(^|[^\\p{L}])${word}($|[^\\p{L}])`, "iu");
       if (regexPartial.test(query)) {
         matchedWordsCount++;
-        // Check if this word already contributed to another category match
-        if (matchedWords.has(word)) {
-          alreadyMatchedWord = true;
-        } else {
-          matchedWords.add(word);
-        }
       }
     }
     
-    // Add category if it has a good match ratio and doesn't overlap too much
-    if (matchedWordsCount > 0 && 
-        (matchedWordsCount / words.length > 0.5 || !alreadyMatchedWord)) {
+    // Add category if it has any matching words
+    if (matchedWordsCount > 0) {
       partialMatches.push({
         category: cat,
         matchRatio: matchedWordsCount / words.length,
