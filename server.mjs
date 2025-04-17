@@ -901,7 +901,8 @@ console.log("Final filters:", filters);
           url: product.url,
           highlight: true,
           onSale: product.onSale,
-          type: product.type
+          type: product.type,
+          specialSales: product.specialSales
         })),
         ...remainingResults.map((r) => ({
           id: r._id.toString(),
@@ -911,7 +912,8 @@ console.log("Final filters:", filters);
           image: r.image,
           url: r.url,
           onSale:r.onSale,
-          type: r.type
+          type: r.type,
+          specialSales: r.specialSales,
         })),
       ];
   
