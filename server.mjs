@@ -900,7 +900,6 @@ console.log("Final filters:", filters);
           image: product.image,
           url: product.url,
           highlight: true,
-          onSale: product.onSale,
           type: product.type,
           specialSales: product.specialSales
         })),
@@ -911,7 +910,6 @@ console.log("Final filters:", filters);
           price: r.price,
           image: r.image,
           url: r.url,
-          onSale:r.onSale,
           type: r.type,
           specialSales: r.specialSales,
         })),
