@@ -350,7 +350,7 @@ function buildVectorSearchPipeline(queryEmbedding, filters = {}) {
       : filters.category;
   }
 
-  if (filters.typey) {
+  if (filters.type) {
     filter.type = Array.isArray(filters.type)
       ? { $in: filters.type }
       : filters.type;
