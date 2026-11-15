@@ -177,28 +177,33 @@ ${wantAlternatives?'ONLY when no product qualifies for matches: leave matches em
   // Products of this shop that carry every distinctive typed word in their title but cannot be sold now.
   const unsellable=products.filter(p=>p.tenantId===client.tenantId&&!sellable(p,client));
   function namesakes(terms){
-    const words=[...new Set(terms.filter(t=>t.length>=3&&!/^\d+$/.test(t)))];if(!words.length)return [];
+    const words=[...new Set(terms.filter(t=>t.length>=3&&!/^\d+$/.test(t)&&!/^sx(?:guard|avoid)0/.test(t)))];if(!words.length)return [];
     return unsellable.filter(p=>{const t=normalize(p.title).split(' ');return words.every(w=>t.includes(w));}).slice(0,20);
   }
   const categorySize=new Map();for(const p of visible)for(const c of new Set(p.categories||[]))categorySize.set(c,(categorySize.get(c)||0)+1);
   // The product asked for exists but is sold out or hidden ("בישבש" → pickled fennel, sold out): its own department
   // (pickles) is the closest answer. A broad department (more than 3% of the shop) says nothing about the product.
-  function department(soldOut,pool){
+  function department(soldOut,pool,terms=[]){
     if(!soldOut.length)return [];
     const broad=Math.max(40,visible.length*0.03),weight=new Map();
     for(const p of soldOut)for(const c of new Set(p.categories||[])){const n=categorySize.get(c)||0;if(n&&n<=broad)weight.set(c,Math.max(weight.get(c)||0,1/n));}
     if(!weight.size)return [];
-    return pool.map(p=>({p,score:[...new Set(p.categories||[])].reduce((s,c)=>s+(weight.get(c)||0),0)})).filter(x=>x.score>0)
+    // Inside the department, products that share a name with the sold-out one come first ("פקוס - מלפפון ערבי" → cucumbers).
+    const asked=new Set(terms),names=new Set(soldOut.flatMap(p=>normalize(p.title).split(' ')).filter(w=>w.length>=3&&!/\d/.test(w)&&!asked.has(w)));
+    return pool.map(p=>{const own=[...new Set(p.categories||[])].reduce((s,c)=>s+(weight.get(c)||0),0);return {p,score:own>0?own+normalize(p.title).split(' ').filter(w=>names.has(w)).length:0};}).filter(x=>x.score>0)
       .sort((a,b)=>b.score-a.score||(b.p.popularity||0)-(a.p.popularity||0)||a.p.id.localeCompare(b.p.id));
   }
   async function closest(query, previous, useModel=true, ready=null){
-    const picked=alternativesFrom(ready,byId);
+    let picked=alternativesFrom(ready,byId);
+    // A sold-out namesake: the selector's few picks are topped up with its department, in the store's order for this query.
+    if(picked.length){const t=normalize(query).split(/\s+/).filter(Boolean),gone=namesakes(t),d=department(gone,visible,t);
+      if(d.length){const have=new Set(picked.map(p=>p.id)),reason='"'+gone[0].title+'" אזל כרגע — מוצר מאותה מחלקה.';picked=[...picked,...distinctProducts(d.filter(x=>!have.has(x.p.id)),Math.max(0,12-picked.length)).map(({p})=>({...p,matchQuality:'alternative',alternativeReason:reason,missingRequirements:['לא אומתה התאמה לכל פרטי הבקשה']}))];if(picked.length>1)picked=applyRanking(picked,client.rankingRules,query).matches;}}
     if(picked.length)return {status:'matched',matches:picked,message:'לא נמצאה התאמה מלאה — אלה החלופות הקרובות ביותר מבין המוצרים שנבדקו.',metadata:{...previous.metadata,phase:'closest-alternatives',exactMatch:false,fullMatch:false,closestFallback:true,rankedByModel:true}};
     if(!visible.length)return previous;
     const terms=normalize(query).split(/\s+/).filter(Boolean);
     let ranked=visible.map(p=>({p,score:terms.reduce((sum,t)=>sum+(normalize(p.title).includes(t)?4:0)+(normalize([p.description,...p.categories,...Object.values(p.specifications||{})].join(' ')).includes(t)?1:0),0)})).sort((a,b)=>b.score-a.score||a.p.id.localeCompare(b.p.id));
     if(rankCandidates){try{const vectors=await rankCandidates(query,visible);const scores=new Map(ranked.map((x,i)=>[x.p.id,1/(60+i)]));for(const [i,x] of vectors.entries())scores.set(x.p.id,(scores.get(x.p.id)||0)+1/(60+i));ranked.sort((a,b)=>scores.get(b.p.id)-scores.get(a.p.id));}catch{}}
-    const soldOut=namesakes(terms),dept=department(soldOut,visible);
+    const soldOut=namesakes(terms),dept=department(soldOut,visible,terms);
     if(dept.length){const at=new Set(dept.map(x=>x.p.id));ranked=[...dept,...ranked.filter(x=>!at.has(x.p.id))];}
     const candidates=distinctProducts(ranked,selectLimit).map(({p})=>({id:p.id,title:p.title,description:String(p.description||'').slice(0,SELECT_DESCRIPTION),categories:p.categories,specifications:p.specifications,price:p.price}));
     let matches=[],response,called=false;
@@ -212,6 +217,7 @@ ${wantAlternatives?'ONLY when no product qualifies for matches: leave matches em
     // The model's few picks from the sold-out product's department are topped up with the rest of that department.
     if(matches.length&&dept.length&&matches.length<12){const have=new Set(matches.map(p=>p.id));matches=[...matches,...distinctProducts(dept.filter(x=>!have.has(x.p.id)),12-matches.length).map(({p})=>({...p,matchQuality:'alternative',alternativeReason:soldOutReason,missingRequirements:['לא אומתה התאמה לכל פרטי הבקשה']}))];}
     if(!matches.length)matches=ranked.slice(0,12).map(({p})=>({...p,matchQuality:'alternative',alternativeReason:inDept.has(p.id)?soldOutReason:'הצעה לפי קרבה במידע הקטלוג; ההתאמה לבקשה לא אומתה.',missingRequirements:['לא אומתה התאמה לכל פרטי הבקשה']}));
+    if(dept.length&&matches.length>1)matches=applyRanking(matches,client.rankingRules,query).matches;
     return {status:'matched',matches,message:rankedByModel?'לא נמצאה התאמה מלאה — אלה החלופות הקרובות ביותר מבין המוצרים שנבדקו.':'מוצגות הצעות מהקטלוג; ההתאמה לבקשה לא אומתה.',metadata:{...previous.metadata,phase:'closest-alternatives',exactMatch:false,fullMatch:false,closestFallback:true,rankedByModel,llmUsed:!!previous.metadata?.llmUsed||called,llmCalls:(previous.metadata?.llmCalls||0)+(called?1:0),models:[...new Set([...(previous.metadata?.models||[]),...(response?.model?[response.model]:[])])],usage:[...(previous.metadata?.usage||[]),...(response?.usage?[response.usage]:[])]}};
   }
   const run=async function(request={}){
