@@ -78,8 +78,8 @@ function compact(rows,covered){for(let i=0;i<rows.length;i++){const r=rows[i];if
 function uncovered(cards,rows){if(!rows.some(r=>slim.has(r)))return false;const ids=new Set();for(const c of cards){ids.add(String(c.id));ids.add(String(c.id).split(':').pop());}
  return rows.some(r=>slim.has(r)&&!ids.has(String(r.id??r._id)));}
 // liveRebuildMs: a rebuild of the whole runtime costs seconds of CPU on a large catalog and blocks every search on the
-// server meanwhile, so live price/stock changes are folded in twice a day (a new edition is built at once).
-export function createTenantSearch({loadRows,checkMs=30000,liveRebuildMs=43200000,now=Date.now}={}){
+// server meanwhile, so live price/stock changes are folded in once a week (a new edition is built at once).
+export function createTenantSearch({loadRows,checkMs=30000,liveRebuildMs=604800000,now=Date.now}={}){
  let fingerprint=null,runtime=null,edition=null,checkedAt=-Infinity,checking=null,building=null,builtDigest=null,builtAt=-Infinity,covered=null;
  async function published(store){
   if(store&&now()-checkedAt>=checkMs)checking??=(async()=>{
