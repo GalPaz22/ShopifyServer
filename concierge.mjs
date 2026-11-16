@@ -38,6 +38,9 @@ import {createReplyCleaner} from './concierge-script.mjs';
 import {beauticsConciergeInstructions, beauticsTriggerDecision, isBeautics} from './tenants/beautics/concierge.mjs';
 import {garminConciergeInstructions, garminServiceOpening, isGarmin, looksLikeGarminServiceQuery, looksLikeGarminSku} from './tenants/garmin/concierge.mjs';
 import {PROOFREAD_PROMPT, proofreadReply} from './concierge-proofread.mjs';
+import {compareSpecs, specLines} from './concierge-compare.mjs';
+import {identityForSession, linkSessionIdentity} from './session-identity.mjs';
+import {garminSpecs} from './tenants/garmin/specs.mjs';
 import {alternativesWorthOpening, bookAbout, CLASSIFY_PROMPT, sameAuthor, conciergeRolloutOpen, isSteimatzky, shownBooks, soldOutNamed, soldOutPossible, steimatzkyConciergeInstructions, worthClassifying} from './tenants/steimatzky/concierge.mjs';
 
 /* --------------------------------------------------------------------------- *
@@ -619,13 +622,68 @@ async function getProduct(args, ctx) {
   }
   if (!or.length) return { error: "יש לספק product_ids, product_id או name." };
 
+  const schema = specSchemaFor(ctx.store);
   const product = await collection.findOne({ $or: or, hidden: { $ne: true },
-    ...(isBeautics(ctx.store) ? {status:{$in:['ACTIVE','publish']}} : {}) }, { projection: PRODUCT_PROJECTION });
+    ...(isBeautics(ctx.store) ? {status:{$in:['ACTIVE','publish']}} : {}) }, { projection: schema ? { ...PRODUCT_PROJECTION, attributes: 1 } : PRODUCT_PROJECTION });
   if (!offeredToShoppers(product)) return { found: false, message: "לא נמצא מוצר תואם בקטלוג." };
+  const specs = schema ? specLines(product, schema, 30, await sparseSibling(product, schema, collection)) : [];
 
   return {
     found: true,
-    product: forModel({ ...shapeProduct(product), description: trim(product.description, 1600) }),
+    product: forModel({ ...shapeProduct(product), description: trim(product.description, 1600), ...(specs.length ? { specs } : {}) }),
+  };
+}
+
+/* --------------------------------------------------------------------------- *
+   Comparison — the store's own specs side by side (concierge-compare.mjs)
+\* --------------------------------------------------------------------------- */
+
+// Stores with a spec schema: their attribute names mapped to comparison fields.
+export const specSchemaFor = (store) => (isGarmin(store) ? garminSpecs : null);
+
+const SPARSE_ATTRIBUTES = 60;
+// A row with a thin spec sheet borrows from the fullest sheet of the same model (schema.modelKey), if the catalog has
+// one: Forerunner 265 | 46mm carries 32 attributes, another colour of the 265 more than 300.
+async function sparseSibling(product, schema, collection) {
+  if (!schema.modelKey || (product.attributes || []).length >= SPARSE_ATTRIBUTES) return null;
+  const key = schema.modelKey(product.name);
+  if (!key) return null;
+  const pattern = new RegExp(key.split(" ").map(escapeRegex).join(".{0,6}"), "i");
+  const rows = await collection.find({ name: pattern }, { projection: { name: 1, attributes: 1 } }).limit(40).toArray();
+  const best = rows.filter((r) => schema.modelKey(r.name) === key && (r.attributes || []).length >= 100)
+    .sort((a, b) => b.attributes.length - a.attributes.length)[0];
+  return best || null;
+}
+
+const MAX_COMPARED = 4;
+
+/**
+ * compare_products: two to four products side by side from their specs. The full table goes to the shopper as a
+ * "comparison" event (runTool); the model gets every differing row and the key rows that are the same, to explain
+ * what matters. Sold-out products may be compared: the shopper asked about them.
+ */
+export async function compareProducts(args, ctx) {
+  const schema = specSchemaFor(ctx.store);
+  if (!schema) return { error: "אין בחנות הזו מפרט להשוואה." };
+  const ids = [...new Set(asArray(args.product_ids).map(String).filter(Boolean))].slice(0, MAX_COMPARED);
+  if (ids.length < 2) return { error: "יש לבחור בין 2 ל-4 מוצרים להשוואה, לפי product_id מתוצאות החיפוש." };
+  const collection = await getCollection(ctx);
+  const or = ids.flatMap((id) => { const n = Number(id); return [{ id }, { ItemID: id }, ...(Number.isFinite(n) ? [{ id: n }, { ItemID: n }] : [])]; });
+  const docs = await collection.find({ $or: or }, { projection: { ...PRODUCT_PROJECTION, attributes: 1 } }).toArray();
+  const byId = new Map(docs.filter(offeredToShoppers).map((d) => [String(d.id ?? d.ItemID), d]));
+  const products = ids.map((id) => byId.get(id)).filter(Boolean);
+  if (products.length < 2) return { error: "לא נמצאו לפחות שני מוצרים להשוואה. חפש אותם וקרא שוב עם המזהים שהוחזרו.", not_found: ids.filter((id) => !byId.has(id)) };
+  const siblings = await Promise.all(products.map((p) => sparseSibling(p, schema, collection)));
+  const table = compareSpecs(products, schema, { siblings });
+  const cards = products.map((p) => cardForProduct(shapeProduct(p)));
+  ctx.comparison = { products: cards, ...table };
+  const keyRow = (r) => ({ label: r.label, values: r.values.map((v) => v ?? "לא צוין במפרט") });
+  return {
+    compared: cards.map(({ product_id, name, price, in_stock }) => ({ product_id, name, price, in_stock })),
+    differences: table.rows.filter((r) => r.differs).map(keyRow),
+    same_key_specs: table.rows.filter((r) => !r.differs && schema.summaryOrder.includes(r.key)).map((r) => ({ label: r.label, value: r.values[0] })),
+    note: "The shopper already sees this table under your answer. Write 2-4 sentences: the differences that decide between them and who each one suits. " +
+      "Use only these specs; \"לא צוין במפרט\" means the store does not list it, not that the product lacks it.",
   };
 }
 
@@ -862,6 +920,21 @@ const toolDefinitions = [
     },
   },
   {
+    name: "compare_products",
+    when: (store) => !!specSchemaFor(store),
+    description:
+      "Compare 2-4 products side by side from the store's technical specs (size, battery, display, water rating, sensors, features). " +
+      "Call it whenever the shopper asks to compare models or asks which of two or three is better; pass product_id values returned by search_catalog. " +
+      "The shopper sees the comparison table; it replaces present_products for this answer.",
+    input_schema: {
+      type: "object",
+      properties: {
+        product_ids: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 4, description: "The products to compare, in the order to show them." },
+      },
+      required: ["product_ids"],
+    },
+  },
+  {
     name: "present_products",
     description:
       "Select the exact in-stock products shown as cards beside your final answer. " +
@@ -890,6 +963,7 @@ const toolHandlers = {
   catalog_facets: catalogFacets,
   find_alternatives: findAlternatives,
   present_products: presentProducts,
+  compare_products: compareProducts,
 };
 
 /** The products a tool result put in front of the model, for the widget to render. */
@@ -1505,6 +1579,10 @@ async function runTool(block, ctx, onEvent) {
       ? {products: [], error: "הלקוח ביקש בלי חלופות. חפש רק את המוצר המבוקש, או ענה על השירות בלי כרטיס."}
       : await handler(block.input || {}, ctx);
     rememberShown(ctx, result);
+    if (block.name === "compare_products" && ctx.comparison && result?.compared) {
+      onEvent({ type: "comparison", ...ctx.comparison });
+      rememberShown(ctx, { products: ctx.comparison.products });
+    }
     // Search/detail results are private reasoning material. Rendering them is
     // what previously put unrelated semantic candidates beside a different
     // textual recommendation. Only the explicit final selection reaches UI.
@@ -1530,7 +1608,7 @@ async function runTool(block, ctx, onEvent) {
  * keeps the full history — tool_use / tool_result blocks must be replayed
  * verbatim on the next turn.
  */
-export async function runAgent({ messages, ctx, onEvent, signal, modelClient }) {
+export async function runAgent({ messages, ctx, onEvent, signal, modelClient, alreadyPresented = false }) {
   if (isSteimatzky(ctx.store)) {
     ctx.responsePolicy ||= steimatzkyTurnPolicy(ctx.store, {history: messages, message: ctx.message, trigger: ctx.trigger});
     const reply = steimatzkyTextOnly(ctx.responsePolicy);
@@ -1544,12 +1622,13 @@ export async function runAgent({ messages, ctx, onEvent, signal, modelClient }) 
   }
   const client = modelClient || getGemini();
   const { model, thinkingLevel } = conciergeModelConfig(ctx.store);
-  const functionDeclarations = toolDefinitions.map(({ name, description, input_schema }) => ({
+  const functionDeclarations = toolDefinitions.filter((tool) => !tool.when || tool.when(ctx.store)).map(({ name, description, input_schema }) => ({
     name, description, parametersJsonSchema: input_schema,
   }));
 
   const usage = { rounds: 0, input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
-  let presentedProducts = false;
+  // alreadyPresented: the comparison table went out before the model ran (the shopper pressed "השווה").
+  let presentedProducts = alreadyPresented;
   // Garmin: a service question (a BuyMe voucher, a manual, when stock returns) is answered in words. Only a turn whose
   // model looked at no products may end without cards; an opening carries its prefetched search, so it never does.
   const textOnlyAllowed = isGarmin(ctx.store) || isSteimatzky(ctx.store);
@@ -1680,6 +1759,11 @@ export async function runAgent({ messages, ctx, onEvent, signal, modelClient }) 
     const results = await Promise.all(toolBlocks.map((block) => runTool(block, ctx, onEvent)));
     let justPresented = false;
     for (let index = 0; index < toolBlocks.length; index++) {
+      if (toolBlocks[index].name === "compare_products" && results[index].value?.compared) {
+        presentedProducts = true;
+        justPresented = true;
+        continue;
+      }
       if (toolBlocks[index].name !== "present_products") continue;
       try {
         const parsed = JSON.parse(results[index].content);
@@ -1859,8 +1943,10 @@ export function createTurnRecorder({ message, opening, trigger }) {
   const products = [];
   const tools = [];
   let error = null;
+  let compared = null;
   return {
     onEvent(event) {
+      if (event.type === "comparison") compared = (event.products || []).map((p) => ({ product_id: p.product_id, name: p.name ?? null, price: p.price ?? null }));
       if (event.type === "text") reply += event.text || "";
       else if (event.type === "text_reset") reply = "";
       else if (event.type === "error") error = event.message || "error";
@@ -1885,6 +1971,7 @@ export function createTurnRecorder({ message, opening, trigger }) {
           .filter((p) => p?.product_id && !seen.has(p.product_id) && seen.add(p.product_id))
           .map((p) => ({ product_id: p.product_id, name: p.name ?? null, price: p.price ?? null, url: p.url ?? null, image: p.image ?? null, ...(p.match_reason ? { match_reason: p.match_reason } : {}) })),
         tools,
+        ...(compared ? { comparison: compared } : {}),
         ...(error ? { error } : {}),
         ...(stopped ? { stopped } : {}),
         ...(rejected ? { rejected } : {}),
@@ -1921,12 +2008,16 @@ async function recordConversation(deps, store, conversation, extra = {}, turn = 
       col.createIndex({ updated_at: -1, conversation_id: -1 }).catch(() => {});
     }
 
+    // Who the shopper is, when the store told us (an order or a signed-in account on this session).
+    const customer = conversation.session_id ? await identityForSession(db, conversation.session_id).catch(() => null) : null;
+
     await col.updateOne(
       { conversation_id: conversation.id },
       {
         $set: {
           conversation_id: conversation.id,
           session_id: conversation.session_id || null,
+          ...(customer ? { customer } : {}),
           query: conversation.trigger?.query || null,
           reason: conversation.trigger?.reason || null,
           turns: conversation.turns,
@@ -2037,6 +2128,16 @@ async function proofreadText(reply, ctx, message) {
   if (checked.changed) console.log(`[CONCIERGE] proofread ${ctx.store.dbName}: ${JSON.stringify(checked.fixes)}`);
   else if (checked.error) console.warn(`[CONCIERGE] proofread skipped (${checked.error})`);
   return checked;
+}
+
+// What the model reads when the shopper pressed "השווה": the specs, and that the table is already on screen.
+function comparisonRequest(compared) {
+  const names = compared.compared.map((p) => p.name).join(" מול ");
+  return `[הלקוח לחץ על "השווה": ${names}. טבלת ההשוואה כבר מוצגת לו.]
+כתוב 2–4 משפטים: ההבדלים שמשנים את ההחלטה ולמי מתאים כל אחד. אל תכתוב טבלה, אל תקרא ל-compare_products ול-present_products.
+<comparison>
+${serializeToolResult(compared)}
+</comparison>`;
 }
 
 function sse(res, event, data) {
@@ -2194,13 +2295,21 @@ export function mountConcierge(app, deps) {
       return res.status(429).json({ error: "conversation_limit_reached", max_turns: MAX_TURNS_PER_CONVERSATION });
     }
 
+    // The shopper pressed "השווה" on two to four cards: build the table now, before any model call, and have the model
+    // write only the summary.
+    const compareIds = !message && specSchemaFor(store) && Array.isArray(req.body?.compare)
+      ? [...new Set(req.body.compare.map((id) => sanitizeId(String(id), 40)).filter(Boolean))].slice(0, MAX_COMPARED) : [];
+    const compareCtx = { store, deps };
+    const compared = compareIds.length >= 2 ? await compareProducts({ product_ids: compareIds }, compareCtx) : null;
+    if (compared && !compared.compared) return res.status(400).json({ error: "compare_failed", message: compared.error });
+
     // No message on a fresh conversation = the auto-opening turn.
-    const opening = !message && conversation.messages.length === 0;
+    const opening = !message && !compared && conversation.messages.length === 0;
     // Garmin: "טרייד אין", "החלפת סוללה", "עדכון שעון" ask for a service. No search is prefetched, so the turn may end
     // in words alone (runAgent: textOnlyAllowed) instead of denying the service and listing unrelated watches.
     const serviceOpening = opening && isGarmin(store) && looksLikeGarminServiceQuery(conversation.trigger?.query);
     const prefetched = opening && !serviceOpening ? await prefetchOpeningSearch(conversation.trigger, { store, deps }) : null;
-    const userText = message || (opening ? (serviceOpening ? garminServiceOpening(conversation.trigger.query) : openingMessage(conversation.trigger, prefetched)) : null);
+    const userText = message || (compared ? comparisonRequest(compared) : null) || (opening ? (serviceOpening ? garminServiceOpening(conversation.trigger.query) : openingMessage(conversation.trigger, prefetched)) : null);
     if (!userText) return res.status(400).json({ error: "message_required" });
 
     // Shopper text goes in wrapped, so the model can always tell where the
@@ -2219,8 +2328,9 @@ export function mountConcierge(app, deps) {
 
     const ctx = { store, deps, trigger: conversation.trigger, message };
     if (prefetched) rememberShown(ctx, prefetched);
+    if (compared) { ctx.comparison = compareCtx.comparison; rememberShown(ctx, { products: ctx.comparison.products }); }
     const signal = { aborted: false, onAbort: null };
-    const recorder = createTurnRecorder({ message: typed, opening, trigger: conversation.trigger });
+    const recorder = createTurnRecorder({ message: typed || (compared ? `השווה: ${compared.compared.map((p) => p.name).join(" מול ")}` : ""), opening, trigger: conversation.trigger });
 
     // Watch the *response*, not the request: in Node 18+ the request emits
     // 'close' as soon as its body has been consumed, which is long before the
@@ -2261,10 +2371,12 @@ export function mountConcierge(app, deps) {
         sse(res, type, rest);
       };
       try {
+        if (compared) emit({ type: "comparison", ...ctx.comparison });
         turnResult = await runAgent({
           messages: conversation.messages,
           ctx,
           signal,
+          alreadyPresented: !!compared,
           onEvent: (event) => {
             if (event.type === "text") reply += event.text;
             else if (event.type === "text_reset") reply = "";
@@ -2302,14 +2414,18 @@ export function mountConcierge(app, deps) {
     const products = [];
     let failed = null;
     let turnResult = null;
+    let comparison = compared ? ctx.comparison : null;
+    if (compared) recorder.onEvent({ type: "comparison", ...ctx.comparison });
 
     try {
       turnResult = await runAgent({
         messages: conversation.messages,
         ctx,
         signal,
+        alreadyPresented: !!compared,
         onEvent: (event) => {
           recorder.onEvent(event);
+          if (event.type === "comparison") comparison = event;
           if (event.type === "text") text += event.text;
           else if (event.type === "text_reset") text = "";
           else if (event.type === "tool_end" && event.tool === "present_products" && event.products?.length) products.push(...event.products);
@@ -2340,6 +2456,7 @@ export function mountConcierge(app, deps) {
       reason: conversation.trigger.reason,
       reply: text,
       products: uniqueProducts,
+      ...(comparison ? { comparison: { products: comparison.products, rows: comparison.rows, summary: comparison.summary, more: comparison.more } } : {}),
       ...(failed ? { error: failed } : {}),
     });
   });
@@ -2408,6 +2525,23 @@ export function mountConcierge(app, deps) {
     }
 
     return res.json({ success: true });
+  });
+
+  /**
+   * A signed-in customer's details for their session, sent server-side by the store plugin (never from the browser
+   * page). Write-only: the store's API key is public, so this never returns what it knows about a session.
+   */
+  app.post("/concierge/identify", async (req, res) => {
+    if (!req.store) return res.status(401).json({ error: "Invalid or missing API key" });
+    const { session_id, customer, user_id } = req.body || {};
+    try {
+      const client = await deps.getMongoClient();
+      const linked = await linkSessionIdentity(client.db(req.store.dbName), session_id, customer, { source: "account", user_id: user_id || null });
+      return res.json({ success: true, linked: !!linked });
+    } catch (err) {
+      console.error("[CONCIERGE] identify failed:", err.message);
+      return res.status(500).json({ error: "identify_failed" });
+    }
   });
 
   /** Rollup: how often the chat opens, for which reason, and what follows. */

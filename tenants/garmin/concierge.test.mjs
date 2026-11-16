@@ -55,3 +55,22 @@ test('Garmin instructions cover the cheapest-product question, part numbers and 
   const text=garminConciergeInstructions({dbName:'garmin'});
   for(const must of ['price_asc','מק"ט','Elevate Gen 5','אינך יכול לבדוק מתי מוצר יחזור'])assert.ok(text.includes(must),must);
 });
+
+test('compare_products lines up the store specs, keeps sold-out models and skips products off sale', async () => {
+  const {compareProducts} = await import('../../concierge.mjs');
+  const attr = (name, value) => ({name, options: [value]});
+  const docs = [
+    {id: 1, name: 'Forerunner® 570 - Black| 42mm', price: 2399, stockStatus: 'instock', status: 'publish', attributes: [attr('משקל', '42 גרם'), attr('זמן סוללה - שעון חכם', 'עד 10 ימים')]},
+    {id: 2, name: 'Forerunner® 965 | 47mm', price: 2499, stockStatus: 'outofstock', status: 'publish', attributes: [attr('משקל', '53 גרם'), attr('זמן סוללה - שעון חכם', 'עד 23 ימים')]},
+    {id: 3, name: 'Forerunner® 965 | Whitestone', price: 2499, stockStatus: 'instock', status: 'draft', attributes: []},
+  ];
+  const matches = (doc, q) => q.$or ? q.$or.some((c) => (c.id !== undefined && c.id === doc.id) || (c.ItemID !== undefined && c.ItemID === doc.ItemID)) : q.name ? q.name.test(doc.name) : true;
+  const collection = {find: (q) => ({limit() { return this; }, toArray: async () => docs.filter((d) => matches(d, q))})};
+  const ctx = {store: {dbName: 'garmin', products: 'products'}, deps: {getMongoClient: async () => ({db: () => ({collection: () => collection})})}};
+  const result = await compareProducts({product_ids: ['1', '2', '3']}, ctx);
+  assert.deepEqual(result.compared.map((p) => [p.product_id, p.in_stock]), [['1', true], ['2', false]]);
+  assert.ok(result.differences.some((r) => r.label === 'סוללה במצב שעון חכם' && r.values[1] === 'עד 23 ימים'));
+  assert.equal(ctx.comparison.rows.find((r) => r.key === 'battery_smart').best, 1);
+  assert.match((await compareProducts({product_ids: ['1']}, ctx)).error, /2 ל-4/);
+  assert.match((await compareProducts({product_ids: ['1', '2']}, {...ctx, store: {dbName: 'steimatzky'}})).error, /אין בחנות/);
+});

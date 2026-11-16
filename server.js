@@ -20,6 +20,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import {mountExperimentPublication} from './experiment-publication.mjs';
 import { applyExperimentVariant, applyPermanentRules, recordSessionAlias } from './experiments-hook.mjs';
 import { mountConcierge, conciergeSearchTrigger } from './concierge.mjs';
+import { linkSessionIdentity } from './session-identity.mjs';
 import { liveConciergeSettings } from './concierge-settings.mjs';
 import { searchBeautics } from './tenants/beautics/search.mjs';
 import { storefrontResponse } from './tenants/beautics/response.mjs';
@@ -17566,7 +17567,8 @@ app.post("/search-to-cart", async (req, res) => {
     const { dbName } = store;
     const { document } = req.body;
     
-    console.log(`[SEARCH-TO-CART] Incoming document:`, JSON.stringify(document));
+    // Customer details stay out of the logs.
+    console.log(`[SEARCH-TO-CART] Incoming document:`, JSON.stringify(document?.customer ? { ...document, customer: "[redacted]" } : document));
     
     // Updated validation - checkout events don't require product_id.
     // search_query is NOT required: most real events have no search behind them
@@ -17772,6 +17774,13 @@ app.post("/search-to-cart", async (req, res) => {
     };
 
     console.log(`[SEARCH-TO-CART] Checking for duplicates within timestamp range: ${thirtyMinutesAgo.toISOString()} to ${thirtyMinutesFromNow.toISOString()} for query: ${enhancedDocument.search_query}`);
+
+    // A completed order names its customer (billing email, first name, phone): tie them to the session, so its
+    // searches and concierge conversations show who it was. Before the duplicate check: a resent order still links.
+    if (document.event_type === 'checkout_completed' && normalizedSessionId && document.customer) {
+      linkSessionIdentity(db, normalizedSessionId, document.customer, { source: 'order', user_id: document.user_id || null, order_id: document.order_id || null })
+        .catch((err) => console.warn('[SEARCH-TO-CART] identity link failed:', err.message));
+    }
 
     const existingDocument = hasTrackingEventId(enhancedDocument) ? null : await targetCollection.findOne(queryForExisting);
     if (existingDocument) {
