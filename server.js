@@ -21,6 +21,7 @@ import {mountExperimentPublication} from './experiment-publication.mjs';
 import { applyExperimentVariant, applyPermanentRules, recordSessionAlias } from './experiments-hook.mjs';
 import { mountConcierge, conciergeSearchTrigger } from './concierge.mjs';
 import { linkSessionIdentity } from './session-identity.mjs';
+import { createIdentityWebhook } from './identity-webhook.mjs';
 import { liveConciergeSettings } from './concierge-settings.mjs';
 import { searchBeautics } from './tenants/beautics/search.mjs';
 import { storefrontResponse } from './tenants/beautics/response.mjs';
@@ -21486,6 +21487,13 @@ app.get("/product-clicks-by-query", async (req, res) => {
  *   note_attributes: [{ name: "session_id", value: "sess-xxxxx" }]
  * - This can be added via Shopify checkout customization or cart attributes
  */
+
+// Order/customer webhook for stores without a plugin of ours (Mano Vino): ties the customer to the session id the
+// order form carried. Private per-store secret (users.identityWebhookSecret); see identity-webhook.mjs.
+app.post("/webhooks/identity", express.json({ limit: '1mb' }), createIdentityWebhook({
+  getUser: async (apiKey) => (await connectToMongoDB(mongodbUri)).db("users").collection("users").findOne({ apiKey }, { projection: { dbName: 1, identityWebhookSecret: 1 } }),
+  getDb: async (dbName) => (await connectToMongoDB(mongodbUri)).db(dbName),
+}));
 
 app.post("/webhooks/shopify/order-created", express.json({ limit: '10mb' }), async (req, res) => {
   const requestId = Math.random().toString(36).substr(2, 9);
