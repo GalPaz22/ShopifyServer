@@ -39,6 +39,8 @@ export function mergeLive(cards,rows,profile,tenantId,seen=new Set()){
  const retired=retiredRows(rows),live=new Map(rows.map(r=>{const a=adaptRow(r,retired);return [a.id,a];})),out=[];
  for(const c of cards){const key=String(c.id).split(':').pop(),row=live.get(String(c.id))||live.get(key);if(!row)continue;seen.add(row.id);
   const next={...c};for(const k of LIVE)if(row[k]!==undefined&&row[k]!==null)next[k]=row[k];
+  // Edition cards built from the crawl can lack the SKU the store's own row has; an exact SKU search needs it.
+  if(row.sku&&!next.sku)next.sku=row.sku;
   // The store's popular flag and sales follow the live rows, so a newly popular product is lifted without a new edition.
   if(row.popular!==undefined){const tags=(next.tags||[]).filter(t=>t!=='isWooPopular');next.tags=row.popular?[...tags,'isWooPopular']:tags;}
   if(row.popularity)next.popularity=row.popularity;out.push(next);}
