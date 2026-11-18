@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 // Steimatzky's concierge opens beside the results, for three moments only: the book the shopper named is sold out, they
 // searched the same thing three times without opening a result, or they asked for advice. The page asks after its
 // results are on screen (POST /concierge/decide), so a search never waits on this and /search itself carries no trigger.
@@ -7,7 +8,14 @@ export const isSteimatzky = store => store?.dbName === 'steimatzky';
 export function conciergeRolloutOpen(store, visitor) {
   const rollout = store?.conciergeRollout;
   if (!rollout || typeof rollout !== 'object') return false;
-  return rollout.enabled === true || (Array.isArray(rollout.visitors) && rollout.visitors.includes(visitor));
+  if (rollout.enabled === true || (Array.isArray(rollout.visitors) && rollout.visitors.includes(visitor))) return true;
+  // {percent: 10}: a stable share of visitors, by a hash of the visitor id (the same shopper always lands on the same side).
+  const percent = Number(rollout.percent);
+  if (visitor && Number.isFinite(percent) && percent > 0) {
+    const bucket = crypto.createHash('sha1').update(`concierge:${store?.dbName || ''}:${visitor}`).digest().readUInt32BE(0) % 10000;
+    return bucket < Math.min(percent, 100) * 100;
+  }
+  return false;
 }
 
 export function steimatzkyConciergeInstructions(store) {

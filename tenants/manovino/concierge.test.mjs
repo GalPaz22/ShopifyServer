@@ -54,3 +54,17 @@ test('the page sends item ids; anything else is dropped', () => {
   assert.deepEqual(shownIds([{id: '52720'}, '88864', {id: 52720}, 'x', {id: '<b>'}]), ['52720', '88864']);
   assert.deepEqual(shownIds(null), []);
 });
+
+import {conciergeRolloutOpen} from '../steimatzky/concierge.mjs';
+test('rollout percent: a stable share of visitors, none without a visitor, all at 100', () => {
+  const store = (rollout) => ({dbName: 'manoVino', conciergeRollout: rollout});
+  const visitors = Array.from({length: 4000}, (_, i) => `vis_${1700000000000 + i * 977}_${(i * 7919).toString(36)}`);
+  const open = visitors.filter((v) => conciergeRolloutOpen(store({percent: 10}), v));
+  assert.ok(open.length > 300 && open.length < 500, `about 10%, got ${open.length}`);
+  assert.deepEqual(open, visitors.filter((v) => conciergeRolloutOpen(store({percent: 10}), v)));
+  assert.equal(conciergeRolloutOpen(store({percent: 10}), ''), false);
+  assert.equal(conciergeRolloutOpen(store({percent: 0}), visitors[0]), false);
+  assert.equal(conciergeRolloutOpen(store({percent: 100}), visitors[0]), true);
+  assert.equal(conciergeRolloutOpen(store({enabled: true}), visitors[0]), true);
+  assert.equal(conciergeRolloutOpen(store(null), visitors[0]), false);
+});
