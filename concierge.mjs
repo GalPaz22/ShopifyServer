@@ -42,6 +42,7 @@ import {compareSpecs, specLines} from './concierge-compare.mjs';
 import {identityForSession, linkSessionIdentity} from './session-identity.mjs';
 import {garminSpecs} from './tenants/garmin/specs.mjs';
 import {alternativesWorthOpening, bookAbout, CLASSIFY_PROMPT, sameAuthor, conciergeRolloutOpen, isSteimatzky, shownBooks, soldOutNamed, soldOutPossible, steimatzkyConciergeInstructions, worthClassifying} from './tenants/steimatzky/concierge.mjs';
+import {answeredOnScreen, CLASSIFY_PROMPT as MANOVINO_CLASSIFY_PROMPT, heldRows, isManoVino, manoVinoConciergeInstructions, namedRows, shownIds, worthDeciding} from './tenants/manovino/concierge.mjs';
 
 /* --------------------------------------------------------------------------- *
    Config
@@ -55,7 +56,7 @@ export function conciergeModelConfig(store) {
   if (isBeautics(store)) return { model: "gemini-3.5-flash-lite", thinkingLevel: "MINIMAL" };
   // Garmin: MINIMAL left "lily" with no answer at all in the 2026-11-01 benchmark; LOW didn't.
   // Steimatzky tried gemini-3.5-flash on 05.11: better answers, but ~13 s a turn; back on Flash-Lite for speed.
-  if (store?.dbName === "garmin" || isSteimatzky(store)) return { model: "gemini-3.5-flash-lite", thinkingLevel: "LOW" };
+  if (store?.dbName === "garmin" || isSteimatzky(store) || isManoVino(store)) return { model: "gemini-3.5-flash-lite", thinkingLevel: "LOW" };
   return { model: MODEL, thinkingLevel: THINKING_LEVEL };
 }
 const MAX_TOKENS = Number(process.env.CONCIERGE_MAX_TOKENS) || 8000;
@@ -980,7 +981,7 @@ function extractProducts(result) {
 
 export function buildSystemPrompt(store) {
   const instructions = typeof store.conciergeInstructions === 'string' ? store.conciergeInstructions.trim() : '';
-  return buildBaseSystemPrompt(store) + beauticsConciergeInstructions(store) + steimatzkyConciergeInstructions(store) + (isSteimatzky(store) ? STEIMATZKY_RESPONSE_POLICY : "") + garminConciergeInstructions(store) + (instructions ? `\n\n## הוראות נוספות של החנות\n${instructions}` : '');
+  return buildBaseSystemPrompt(store) + beauticsConciergeInstructions(store) + steimatzkyConciergeInstructions(store) + (isSteimatzky(store) ? STEIMATZKY_RESPONSE_POLICY : "") + garminConciergeInstructions(store) + manoVinoConciergeInstructions(store) + (instructions ? `\n\n## הוראות נוספות של החנות\n${instructions}` : '');
 }
 
 function buildBaseSystemPrompt(store) {
@@ -1160,7 +1161,7 @@ async function consumeQuota(deps, key, limit, windowSeconds) {
 
 const TRIGGER_PATHS = new Set(["/search", "/fast-search"]);
 
-const TRIGGER_REASONS = new Set(["no_results", "out_of_stock", "non_literal", "consultative", "repeated", "alternatives"]);
+const TRIGGER_REASONS = new Set(["no_results", "out_of_stock", "non_literal", "consultative", "repeated", "alternatives", "not_carried", "not_shown", "idle"]);
 
 const OPENERS = {
   no_results: "לא מצאתי מוצר שתואם בדיוק למה שחיפשת — אבל בוא נראה יחד מה כן מתאים.",
@@ -1386,10 +1387,27 @@ const CLASSIFY_TIMEOUT_MS = 4000;
 const CLASSIFY_LIMIT = 30; // per shopper per hour
 
 /** true / false, or null when the model didn't answer in time (treated as "not advice", and not remembered). */
-async function asksForAdvice(query, visitor, deps) {
-  const key = query.toLocaleLowerCase("he");
+function asksForAdvice(query, visitor, deps) {
+  return classifySearch(query, visitor, deps, {
+    tenant: "steimatzky", prompt: CLASSIFY_PROMPT,
+    schema: { type: "object", properties: { advice: { type: "boolean" } }, required: ["advice"], additionalProperties: false },
+    read: (answer) => answer.advice === true,
+  });
+}
+
+/** Mano Vino: "name" (one product or brand), "advice" or "browse"; null when the model didn't answer in time. */
+function manoVinoQueryKind(query, visitor, deps) {
+  return classifySearch(query, visitor, deps, {
+    tenant: "manovino", prompt: MANOVINO_CLASSIFY_PROMPT,
+    schema: { type: "object", properties: { kind: { type: "string", enum: ["name", "advice", "browse"] } }, required: ["kind"], additionalProperties: false },
+    read: (answer) => ["name", "advice", "browse"].includes(answer.kind) ? answer.kind : "browse",
+  });
+}
+
+async function classifySearch(query, visitor, deps, { tenant, prompt, schema, read }) {
+  const key = `${tenant}:${query.toLocaleLowerCase("he")}`;
   if (classified.has(key)) return classified.get(key);
-  const quota = await consumeQuota(deps, `concierge:classify:steimatzky:${visitor || "anonymous"}`, CLASSIFY_LIMIT, SHOPPER_WINDOW_SECONDS);
+  const quota = await consumeQuota(deps, `concierge:classify:${tenant}:${visitor || "anonymous"}`, CLASSIFY_LIMIT, SHOPPER_WINDOW_SECONDS);
   if (!quota.allowed) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CLASSIFY_TIMEOUT_MS);
@@ -1400,16 +1418,16 @@ async function asksForAdvice(query, visitor, deps) {
       config: {
         abortSignal: controller.signal,
         maxOutputTokens: 60,
-        systemInstruction: CLASSIFY_PROMPT,
+        systemInstruction: prompt,
         responseMimeType: "application/json",
-        responseJsonSchema: { type: "object", properties: { advice: { type: "boolean" } }, required: ["advice"], additionalProperties: false },
+        responseJsonSchema: schema,
         thinkingConfig: { thinkingLevel: "MINIMAL" },
       },
     });
-    const advice = JSON.parse(response.text || "{}").advice === true;
+    const answer = read(JSON.parse(response.text || "{}"));
     if (classified.size >= CLASSIFY_CACHE) classified.delete(classified.keys().next().value);
-    classified.set(key, advice);
-    return advice;
+    classified.set(key, answer);
+    return answer;
   } catch (err) {
     console.warn("[CONCIERGE] classify failed:", err.message);
     return null;
@@ -1429,6 +1447,38 @@ export async function decideMoment({ query, visitor, repeats, shown, alternative
   if (alternatives && alternativesWorthOpening(query, shown)) return { reason: "alternatives", product_ids: ids };
   if (repeats >= 3) return { reason: "repeated", product_ids: ids };
   if (worthClassifying(query, shown) && await asksForAdvice(query, visitor, ctx.deps)) return { reason: "consultative", product_ids: ids };
+  return null;
+}
+
+/**
+ * Mano Vino's moments, asked by manovino.co.il/AISearch/ once its results are on screen (shown = their ItemIDs, read
+ * against the catalog for names and stock). A bottle the search names: sold out → out_of_stock, in stock but not on
+ * screen → not_shown, not in the catalog at all → not_carried. Otherwise a request for advice → consultative, an empty
+ * page → no_results. idle: the page asks again after the shopper sat on the results without opening one.
+ */
+export async function decideManoVinoMoment({ query, visitor, shown, idle = false, ctx }) {
+  const ids = shownIds(shown);
+  if (!worthDeciding(query)) return null;
+  if (idle) return { reason: "idle", product_ids: ids.slice(0, 6) };
+  const collection = await getCollection(ctx);
+  const onScreen = ids.length ? (await collection.find({ id: { $in: ids.flatMap((id) => [id, Number(id)]) } }, { projection: { id: 1, name: 1, stockStatus: 1, stock_status: 1 } }).toArray())
+    .map((p) => ({ id: String(p.id), name: p.name, inStock: productInStock(p) })) : [];
+  const shownInStock = onScreen.filter((p) => p.inStock).map((p) => p.id);
+  if (answeredOnScreen(query, onScreen)) {
+    return await manoVinoQueryKind(query, visitor, ctx.deps) === "advice" ? { reason: "consultative", product_ids: shownInStock.slice(0, 6) } : null;
+  }
+  const candidates = await textCandidates(ctx, query, { inStock: false });
+  let named = namedRows(query, candidates), kind = null;
+  if (!named.length) {
+    kind = await manoVinoQueryKind(query, visitor, ctx.deps);
+    if (kind === "name") named = heldRows(query, candidates);
+  }
+  const inStock = named.filter(productInStock), soldOut = named.filter((p) => !productInStock(p));
+  if (inStock.length) return { reason: "not_shown", product_ids: inStock.slice(0, 6).map((p) => String(p.id)) };
+  if (soldOut.length) return { reason: "out_of_stock", product_ids: soldOut.slice(0, 6).map((p) => String(p.id)) };
+  if (kind === "name") return { reason: "not_carried", product_ids: shownInStock.slice(0, 6) };
+  if (kind === "advice") return { reason: "consultative", product_ids: shownInStock.slice(0, 6) };
+  if (!shownInStock.length) return { reason: "no_results", product_ids: [] };
   return null;
 }
 
@@ -1859,6 +1909,17 @@ export async function prefetchOpeningSearch(trigger, ctx) {
         return { sold_out: { name: book.name, author: book.author || null }, same_author: same, similar: alike };
       }
     }
+    // Mano Vino: the sold-out bottle by name and its in-stock neighbours; a bottle the search left off the screen, as is.
+    if (isManoVino(ctx.store) && trigger.product_ids?.length && (trigger.reason === "out_of_stock" || trigger.reason === "not_shown")) {
+      if (trigger.reason === "not_shown") return await getProduct({ product_ids: trigger.product_ids.slice(0, 6) }, ctx);
+      const collection = await getCollection(ctx);
+      const id = trigger.product_ids[0];
+      const bottle = await collection.findOne({ $or: [{ id: String(id) }, { id: Number(id) }] }, { projection: { name: 1 } });
+      if (bottle) {
+        const similar = await findAlternatives({ product_id: id, limit: 8 }, ctx);
+        return { sold_out: { name: bottle.name, noun: "המוצר" }, similar: similar.products };
+      }
+    }
     const [found, any] = await Promise.all([
       searchCatalog({ query: trigger.query, limit: PREFETCH_LIMIT }, ctx),
       isGarmin(ctx.store) ? searchCatalog({ query: trigger.query, limit: 6, in_stock: false }, ctx) : null,
@@ -1907,13 +1968,16 @@ function openingMessage(trigger, prefetched = null) {
 <search_result>
 ${serializeToolResult(prefetched)}
 </search_result>`;
-  const situation = soldOut ? `הלקוח חיפש באתר ${query}. הספר "${soldOut.name}"${soldOut.author ? ` של ${soldOut.author}` : ""} אזל מהמלאי: אמור זאת במשפט הראשון, בשם הספר, ואז הצע חלופה.` : {
+  const situation = soldOut ? `הלקוח חיפש באתר ${query}. ${soldOut.noun || "הספר"} "${soldOut.name}"${soldOut.author ? ` של ${soldOut.author}` : ""} אזל מהמלאי: אמור זאת במשפט הראשון, בשמו, ואז הצע חלופה.` : {
     no_results: `הלקוח חיפש באתר ${query} ולא הוחזרו לו תוצאות.`,
     out_of_stock: `הלקוח חיפש באתר ${query} וכל מה שהתאים אזל מהמלאי.`,
     non_literal: `הלקוח חיפש באתר ${query}, והחיפוש לא היה בטוח שהתוצאות עונות עליו. ייתכן שהן כן — בדוק בעצמך.`,
     consultative: `הלקוח כתב בחיפוש באתר ${query} — זו בקשת ייעוץ. התוצאות כבר מוצגות לו ליד השיחה; ענה על הבקשה עצמה בהמלצה.`,
     alternatives: `הלקוח חיפש באתר ${query} ולא נמצא מוצר שתואם בדיוק; ליד השיחה מוצגות לו חלופות קרובות. אמור בקצרה שהמוצר המבוקש לא נמצא בחנות, ועזור לו לבחור חלופה טובה: מאותו סוג מוצר, מאותו סופר או יוצר, או מאותה סדרה.`,
     repeated: `הלקוח חיפש באתר שוב ושוב דברים דומים, אחרון ${query}, ולא פתח אף תוצאה. כנראה עדיין לא מצא את מה שהוא מחפש.`,
+    not_carried: `הלקוח חיפש באתר ${query}: שם של מוצר, יצרן או מותג שהחנות לא מחזיקה (גם לא כמוצר שאזל). אמור זאת במשפט אחד, והצע את הקרוב ביותר שיש במלאי: אותו סגנון, זן או אזור, ובטווח מחיר דומה.`,
+    not_shown: `הלקוח חיפש באתר ${query}; המוצר שביקש קיים במלאי אבל לא הופיע בתוצאות שעל המסך. הצג אותו מיד, ואם יש כמה גרסאות, עזור לבחור ביניהן.`,
+    idle: `הלקוח נמצא כבר כמה שניות בתוצאות החיפוש של ${query} ולא פתח אף מוצר; כנראה הוא מתלבט. עזור לו לבחור: המלצה ממוקדת מתוך מה שמתאים לחיפוש, ושאלה אחת שתכוון (תקציב, אוכל או אירוע). אל תזכיר שהוא מתלבט או כמה זמן עבר.`,
   }[trigger?.reason] || `הלקוח חיפש באתר ${query}.`;
 
   return `[הודעת פתיחה אוטומטית — הלקוח עדיין לא כתב כלום]
@@ -2172,11 +2236,13 @@ export function mountConcierge(app, deps) {
   app.post("/concierge/decide", async (req, res) => {
     if (!req.store) return res.status(401).json({ error: "Invalid or missing API key" });
     const visitor = sanitizeId(req.body?.session_id);
-    if (!isSteimatzky(req.store) || !conciergeRolloutOpen(req.store, visitor)) return res.json({ open: false });
+    if (!(isSteimatzky(req.store) || isManoVino(req.store)) || !conciergeRolloutOpen(req.store, visitor)) return res.json({ open: false });
     try {
       const query = sanitizeShopperText(req.body?.query, 200);
       if (!query || query.length < 2) return res.json({ open: false });
-      const reason = await decideMoment({ query, visitor, repeats: Number(req.body?.repeats) || 0, shown: shownBooks(req.body?.shown), alternatives: req.body?.alternatives === true, ctx: { store: req.store, deps } });
+      const reason = isManoVino(req.store)
+        ? await decideManoVinoMoment({ query, visitor, shown: req.body?.shown, idle: req.body?.idle === true, ctx: { store: req.store, deps } })
+        : await decideMoment({ query, visitor, repeats: Number(req.body?.repeats) || 0, shown: shownBooks(req.body?.shown), alternatives: req.body?.alternatives === true, ctx: { store: req.store, deps } });
       return res.json(reason ? { open: true, trigger: { reason: reason.reason, query, product_ids: reason.product_ids } } : { open: false });
     } catch (err) {
       console.warn("[CONCIERGE] decide failed:", err.message);
