@@ -141,7 +141,7 @@ export function createTenantSearch({loadRows,checkMs=30000,liveRebuildMs=4320000
  // Suggestions while the shopper types: the same edition and live rows as search, answered from the index only.
  search.suggest=async({collection,moduleStore,query,limit})=>{
   const rt=await current(collection,moduleStore);if(typeof rt.suggest!=='function')throw Error('Engine has no suggestions; export the module again');
-  const r=await rt.suggest(query,{limit});return {...r,matches:r.matches.map(rt.attach),revision:rt.revision};
+  const r=await rt.suggest(query,{limit});return {...r,matches:r.matches.map(rt.attach),revision:rt.revision,strictAlternatives:rt.profile.hookData?.rikushetSearchRules?.strictAlternatives===true};
  };
  return search;
 }

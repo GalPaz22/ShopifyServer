@@ -32,7 +32,7 @@ export function createTenantRoutes({getDb,search=createTenantSearch({loadRows:cr
   async autocomplete(req,res,next){if(!mine(req)||!enabled(req)||typeof search.suggest!=='function')return next();
    const query=typeof req.query.query==='string'?req.query.query.trim():'';if(query.length<2||query.length>300)return next();
    try{const db=await getDb(manifest.dbName),r=await search.suggest({collection:db.collection(req.store.products||manifest.collection||'products'),moduleStore:db.collection('semantix_module'),query,limit:Math.min(Math.max(parseInt(req.query.limit,10)||8,1),24)});
-    if(!r.matches.length)return next();
+    if(!r.matches.length&&!r.strictAlternatives)return next();
     res.setHeader('X-Semantix-Tenant',manifest.slug+'@'+(r.revision??manifest.revision));onServed();
     return res.json(r.matches.map(p=>{const {description,specifications,provenance,issues,badgeCandidates,...rest}=p,name=p.title??p.name;return {...rest,suggestion:name,name,source:'products',author:specifications?.author||rest.author||''};}));}
    catch(error){console.error('[SEMANTIX '+manifest.slug+'] autocomplete',error.message);if(onError)onError(error);return next();}
