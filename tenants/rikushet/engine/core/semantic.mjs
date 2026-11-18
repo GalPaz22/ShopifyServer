@@ -31,6 +31,7 @@ const plain=s=>s.replace(/[*_`#]+/g,'').replace(/\s+/g,' ').trim();
 const SELECT_DESCRIPTION=1200;
 const distinctProducts=(list,limit)=>{const seen=new Set(),out=[];for(const x of list){const key=normalize(x.p.title)+'|'+x.p.price;if(seen.has(key))continue;seen.add(key);out.push(x);if(out.length>=limit)break;}return out;};
 export function createSearchService(products, client, generate, {ttlMs=600000,maxEntries=100,maxCandidates=100,maxCandidatesVector=100,selectCandidates=40,timeoutMs=120000,now=Date.now,lightweightRouter=true,routerTimeoutMs=10000,retrieve,rankCandidates,expansion='always',expandBelow=8,deepModel=null,fillTo=0,hooks=null,llmConcurrency=2,queueMs=0,lexicalFirst=false}={}) {
+  const strictAlternatives=client.hookData?.rikushetSearchRules?.strictAlternatives===true;
   const visible=products.filter(p=>p.tenantId===client.tenantId&&sellable(p,client));
   const selectLimit=Math.min(maxCandidates,selectCandidates);
   const categories=[...new Set(visible.flatMap(p=>p.categories))].sort();
@@ -89,6 +90,11 @@ export function createSearchService(products, client, generate, {ttlMs=600000,ma
     // "last" is a guarantee, so it goes after the function too: out-of-stock products follow every in-stock one, except an
     // exact title match (stockLast). The sort is stable — the rules' and the function's order holds within each part.
     if(stockPolicy(client)==='last'&&result.matches.some(p=>p.stockStatus!=='instock'))result={...result,matches:stockLast(result.matches,key)};
+    // Rikushet serves verified matches; no catalog filler after an empty or failed search.
+    if(strictAlternatives){
+      const matches=result.matches.filter(p=>p.matchQuality!=='alternative'&&!p.semanticFill);
+      result={...result,matches,...(!matches.length&&result.status==='matched'?{status:'empty',message:'לא נמצאו מוצרים התואמים לחיפוש.'}:{}),metadata:{...result.metadata,strictAlternatives:true,...(!matches.length?{exactMatch:false,fullMatch:false}: {})}};
+    }
     return save(key,result);
   }
   function save(key,result){
@@ -157,7 +163,7 @@ DATA ${JSON.stringify({query,detected:literal.plan,categories,colors:Object.keys
       const candidates=distinctProducts(scored,selectLimit).map(({p})=>({id:p.id,title:p.title,categories:p.categories,collections:p.collections||[],colors:p.colors,finishes:p.finishes,tags:p.tags,specifications:Object.entries(p.specifications||{}).map(([k,v])=>k+': '+v).join('\n'),description:String(p.description||'').slice(0,SELECT_DESCRIPTION),price:p.price}));
       const details={intent:plan.intent,requirements:plan.requirements,retrievalTerms:plan.terms,candidateCount:candidates.length,candidatesTruncated:scored.length>candidates.length};
       if(!candidates.length)return noVerifiedMatches(query,plan,'no-semantic-candidates',meta(details));
-      const wantAlternatives=!fillTo&&!literal.matches.length;
+      const wantAlternatives=!strictAlternatives&&!fillTo&&!literal.matches.length;
       const selection=await ask('select',`Select and rank only products supported by the supplied catalog evidence for the ORIGINAL shopping request in the store context below.
 Return ONLY the required JSON object matching the schema. No explanation, commentary, markdown, headings, reasoning, or extra keys.
 STORE CONTEXT ${JSON.stringify({tenant:client.tenantId,platform:client.platform,domain:client.domain||'beauty/nail-supply',schemaVersion:client.version})}
@@ -198,6 +204,7 @@ ${wantAlternatives?'ONLY when no product qualifies for matches: leave matches em
     }finally{clearTimeout(timer);}
   }
   async function closest(query, previous, useModel=true, ready=null){
+    if(strictAlternatives)return {...previous,matches:[],total:0,message:'לא נמצאו מוצרים התואמים לחיפוש.',metadata:{...previous.metadata,phase:'no-related-products',exactMatch:false,fullMatch:false,closestFallback:false,alternativesDeclined:true,strictAlternatives:true}};
     const picked=alternativesFrom(ready,byId);
     if(picked.length)return {status:'matched',matches:picked,message:'לא נמצאה התאמה מלאה — אלה החלופות הקרובות ביותר מבין המוצרים שנבדקו.',metadata:{...previous.metadata,phase:'closest-alternatives',exactMatch:false,fullMatch:false,closestFallback:true,rankedByModel:true}};
     const eligible=visible.filter(p=>matchesTaxonomy(p,planQuery(query,client)));if(!eligible.length)return previous;
